@@ -119,13 +119,13 @@ A hand-written ~50-line service worker (`public/sw.js`) rather than a framework 
 
 ## Getting started
 
-Requires Node 22+ and a free [Neon](https://neon.com) project.
+Requires Node 22+, [pnpm](https://pnpm.io) 10 and a free [Neon](https://neon.com) project.
 
 ```bash
-npm install
+pnpm install
 cp .env.example .env.local     # then fill in the three values below
-npm run db:migrate             # creates the tables
-npm run dev                    # http://localhost:3000
+pnpm db:migrate             # creates the tables
+pnpm dev                    # http://localhost:3000
 ```
 
 | Variable | What |
@@ -140,20 +140,20 @@ Tip: create a separate Neon **branch** for local development so testing never to
 
 | Command | Does |
 |---|---|
-| `npm run dev` | Dev server |
-| `npm run build` / `npm start` | Production build / server |
-| `npm test` | Unit tests (Vitest) |
-| `npm run lint` | ESLint |
-| `npm run db:generate` | Generate a SQL migration from `src/db/schema.ts` |
-| `npm run db:migrate` | Apply migrations to `DATABASE_URL` |
-| `npm run db:studio` | Browse the database |
+| `pnpm dev` | Dev server |
+| `pnpm build` / `pnpm start` | Production build / server |
+| `pnpm test` | Unit tests (Vitest) |
+| `pnpm lint` | ESLint |
+| `pnpm db:generate` | Generate a SQL migration from `src/db/schema.ts` |
+| `pnpm db:migrate` | Apply migrations to `DATABASE_URL` |
+| `pnpm db:studio` | Browse the database |
 
 ### Deploying to Vercel
 
 1. Push to GitHub and import the repo in Vercel.
 2. Add `DATABASE_URL`, `ADMIN_PASSWORD`, `SESSION_SECRET` as environment variables.
 3. Set the function region close to your database (Singapore, `sin1`, for a `ap-southeast-1` Neon project) under *Settings → Functions*.
-4. Run `npm run db:migrate` once against the production database.
+4. Run `pnpm db:migrate` once against the production database.
 
 ### Project layout
 
