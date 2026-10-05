@@ -53,7 +53,16 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
         <ul className="flex flex-col gap-2">
           {[...perGame].reverse().map((g) => (
             <li key={g.gameId} className={`${card} flex items-center justify-between`}>
-              <Link href={`/games/${g.gameId}`}>{formatDate(g.playedOn)}</Link>
+              <span>
+                <Link href={`/games/${g.gameId}`} className="block">
+                  {formatDate(g.playedOn)}
+                </Link>
+                {(g.lines.length > 1 || g.lines.some((l) => !l.own)) && (
+                  <span className={`${muted} block`}>
+                    {g.lines.map((l) => (l.own ? "own share" : `for ${l.forName}`)).join(" + ")}
+                  </span>
+                )}
+              </span>
               <span className="text-right">
                 <span className="block font-medium">{formatTaka(g.charge)}</span>
                 <span className={g.due === 0 ? "text-sm text-emerald-600" : "text-sm text-red-600"}>
@@ -73,7 +82,14 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
             <li key={p.id} className={`${card} flex items-center justify-between`}>
               <span>
                 <span className="block font-medium">{formatTaka(p.amount)}</span>
-                <span className={muted}>{formatDate(p.paidOn)}</span>
+                <span className={muted}>
+                  {formatDate(p.paidOn)}
+                  {p.gameId !== null &&
+                    (() => {
+                      const g = perGame.find((x) => x.gameId === p.gameId);
+                      return g ? ` · for ${formatDate(g.playedOn)}` : "";
+                    })()}
+                </span>
               </span>
               <DeletePaymentButton id={p.id} />
             </li>

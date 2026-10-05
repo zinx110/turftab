@@ -1,4 +1,5 @@
 import { asc, eq } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { gamePlayers, games, payments, players } from "@/db/schema";
 import { requireAdmin } from "./auth";
@@ -40,21 +41,26 @@ export async function buildExport(name: ExportName) {
       );
     }
     case "charges": {
+      const billedTo = alias(players, "billed_to");
       const rows = await db()
         .select({
           gameId: gamePlayers.gameId,
           playedOn: games.playedOn,
           playerId: players.id,
           player: players.name,
+          guest: gamePlayers.isGuest,
           charge: gamePlayers.charge,
+          billedToId: gamePlayers.billedToId,
+          billedTo: billedTo.name,
         })
         .from(gamePlayers)
         .innerJoin(games, eq(games.id, gamePlayers.gameId))
         .innerJoin(players, eq(players.id, gamePlayers.playerId))
+        .leftJoin(billedTo, eq(billedTo.id, gamePlayers.billedToId))
         .orderBy(asc(games.playedOn), asc(gamePlayers.gameId), asc(players.name));
       return toCsv(
-        ["game_id", "date", "player_id", "player", "charge"],
-        rows.map((r) => [r.gameId, r.playedOn, r.playerId, r.player, r.charge]),
+        ["game_id", "date", "player_id", "player", "guest", "charge", "billed_to_id", "billed_to"],
+        rows.map((r) => [r.gameId, r.playedOn, r.playerId, r.player, r.guest, r.charge, r.billedToId, r.billedTo]),
       );
     }
     case "payments": {
@@ -64,6 +70,7 @@ export async function buildExport(name: ExportName) {
           playerId: players.id,
           player: players.name,
           amount: payments.amount,
+          gameId: payments.gameId,
           paidOn: payments.paidOn,
           note: payments.note,
         })
@@ -71,8 +78,8 @@ export async function buildExport(name: ExportName) {
         .innerJoin(players, eq(players.id, payments.playerId))
         .orderBy(asc(payments.paidOn), asc(payments.id));
       return toCsv(
-        ["id", "player_id", "player", "amount", "paid_on", "note"],
-        rows.map((r) => [r.id, r.playerId, r.player, r.amount, r.paidOn, r.note]),
+        ["id", "player_id", "player", "amount", "game_id", "paid_on", "note"],
+        rows.map((r) => [r.id, r.playerId, r.player, r.amount, r.gameId, r.paidOn, r.note]),
       );
     }
     case "balances": {

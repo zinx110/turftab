@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { gameItems, gamePlayers, games, payments, players, settings } from "@/db/schema";
 import { requireAdmin } from "./auth";
@@ -21,15 +22,29 @@ export async function writeSetting(key: string, value: string) {
     .onConflictDoUpdate({ target: settings.key, set: { value } });
 }
 
+// A charge is owed by the player it is billed to: the attendee themselves,
+// unless their share was transferred to someone else.
+const billedPlayer = sql<number>`coalesce(${gamePlayers.billedToId}, ${gamePlayers.playerId})`;
+
 // ---- games ----------------------------------------------------------------
+
+export type GamePlayer = {
+  id: number;
+  name: string;
+  charge: number; // their share (0 for guests)
+  guest: boolean;
+  billedToId: number | null;
+  billedToName: string | null;
+};
 
 export type GameView = {
   id: number;
   playedOn: string;
   note: string | null;
   items: { id: number; label: string; amount: number }[];
-  players: { id: number; name: string; charge: number }[];
+  players: GamePlayer[];
   total: number;
+  headcount: number; // paying players (guests excluded)
   perHead: number;
   surplus: number;
 };
@@ -44,6 +59,7 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
     .orderBy(desc(games.playedOn), desc(games.id));
   if (gameRows.length === 0) return [];
 
+  const billedTo = alias(players, "billed_to");
   const ids = gameRows.map((g) => g.id);
   const [itemRows, playerRows] = await Promise.all([
     db().select().from(gameItems).where(inArray(gameItems.gameId, ids)).orderBy(asc(gameItems.id)),
@@ -53,9 +69,13 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
         id: players.id,
         name: players.name,
         charge: gamePlayers.charge,
+        guest: gamePlayers.isGuest,
+        billedToId: gamePlayers.billedToId,
+        billedToName: billedTo.name,
       })
       .from(gamePlayers)
       .innerJoin(players, eq(players.id, gamePlayers.playerId))
+      .leftJoin(billedTo, eq(billedTo.id, gamePlayers.billedToId))
       .where(inArray(gamePlayers.gameId, ids))
       .orderBy(asc(players.name)),
   ]);
@@ -64,16 +84,20 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
     const items = itemRows.filter((i) => i.gameId === g.id);
     const ps = playerRows.filter((p) => p.gameId === g.id);
     const total = items.reduce((s, i) => s + i.amount, 0);
-    const perHead = ps.length ? perHeadCharge(total, ps.length) : 0;
+    const headcount = ps.filter((p) => !p.guest).length;
+    const perHead = headcount ? perHeadCharge(total, headcount) : 0;
     return {
       id: g.id,
       playedOn: g.playedOn,
       note: g.note,
       items: items.map(({ id, label, amount }) => ({ id, label, amount })),
-      players: ps.map(({ id, name, charge }) => ({ id, name, charge })),
+      players: ps.map(({ id, name, charge, guest, billedToId, billedToName }) => ({
+        id, name, charge, guest, billedToId, billedToName,
+      })),
       total,
+      headcount,
       perHead,
-      surplus: perHead * ps.length - total,
+      surplus: perHead * headcount - total,
     };
   });
 }
@@ -91,12 +115,20 @@ export async function getGame(id: number) {
 // ---- players & ledger -----------------------------------------------------
 
 async function loadLedger(playerId: number) {
+  const attendee = alias(players, "attendee");
   const [chargeRows, paymentRows] = await Promise.all([
     db()
-      .select({ gameId: gamePlayers.gameId, playedOn: games.playedOn, charge: gamePlayers.charge })
+      .select({
+        gameId: gamePlayers.gameId,
+        playedOn: games.playedOn,
+        charge: gamePlayers.charge,
+        forId: gamePlayers.playerId,
+        forName: attendee.name,
+      })
       .from(gamePlayers)
       .innerJoin(games, eq(games.id, gamePlayers.gameId))
-      .where(eq(gamePlayers.playerId, playerId)),
+      .innerJoin(attendee, eq(attendee.id, gamePlayers.playerId))
+      .where(and(sql`${billedPlayer} = ${playerId}`, gt(gamePlayers.charge, 0))),
     db()
       .select()
       .from(payments)
@@ -105,7 +137,17 @@ async function loadLedger(playerId: number) {
   ]);
   const charged = chargeRows.reduce((s, c) => s + c.charge, 0);
   const paid = paymentRows.reduce((s, p) => s + p.amount, 0);
-  const { games: perGame, credit } = allocatePayments(chargeRows, paid);
+  const { games: allocated, credit } = allocatePayments(
+    chargeRows,
+    paymentRows.map((p) => ({ amount: p.amount, gameId: p.gameId })),
+  );
+  // Attach what each game's charge is made of (own share, people covered).
+  const perGame = allocated.map((g) => ({
+    ...g,
+    lines: chargeRows
+      .filter((c) => c.gameId === g.gameId)
+      .map((c) => ({ forId: c.forId, forName: c.forName, charge: c.charge, own: c.forId === playerId })),
+  }));
   return { perGame, credit, payments: paymentRows, charged, paid, balance: charged - paid };
 }
 
@@ -114,22 +156,27 @@ export async function getPlayerBalance(playerId: number) {
   return (await loadLedger(playerId)).balance;
 }
 
+// What this player still owes for one game (own share + anyone they cover).
+export async function getGameDue(playerId: number, gameId: number) {
+  await requireAdmin();
+  const g = (await loadLedger(playerId)).perGame.find((x) => x.gameId === gameId);
+  return g ? g.due : 0;
+}
+
 export async function getPlayersWithBalances() {
   await requireAdmin();
-  const total = (col: typeof gamePlayers.charge | typeof payments.amount) =>
-    sql<number>`coalesce(sum(${col}), 0)::int`;
   const [rows, charged, paid] = await Promise.all([
     db().select().from(players).orderBy(asc(players.name)),
     db()
-      .select({ playerId: gamePlayers.playerId, total: total(gamePlayers.charge) })
+      .select({ playerId: billedPlayer, total: sql<number>`coalesce(sum(${gamePlayers.charge}), 0)::int` })
       .from(gamePlayers)
-      .groupBy(gamePlayers.playerId),
+      .groupBy(billedPlayer),
     db()
-      .select({ playerId: payments.playerId, total: total(payments.amount) })
+      .select({ playerId: payments.playerId, total: sql<number>`coalesce(sum(${payments.amount}), 0)::int` })
       .from(payments)
       .groupBy(payments.playerId),
   ]);
-  const chargedBy = new Map(charged.map((r) => [r.playerId, r.total]));
+  const chargedBy = new Map(charged.map((r) => [Number(r.playerId), r.total]));
   const paidBy = new Map(paid.map((r) => [r.playerId, r.total]));
   return rows.map((p) => {
     const c = chargedBy.get(p.id) ?? 0;
@@ -160,6 +207,41 @@ export async function getPlayersByIds(ids: number[]) {
   return db().select({ id: players.id }).from(players).where(inArray(players.id, ids));
 }
 
+// ---- collecting for one game (admin) --------------------------------------
+
+// Who owes money for this game, and how much of it is settled. A payer can
+// owe for people other than themselves (a sponsor), and need not have played.
+export async function getGameCollect(gameId: number) {
+  await requireAdmin();
+  const game = (await loadGames(gameId))[0];
+  if (!game) return null;
+
+  const payerIds = [
+    ...new Set(game.players.filter((p) => !p.guest).map((p) => p.billedToId ?? p.id)),
+  ];
+  const nameOf = new Map<number, string>();
+  for (const p of game.players) {
+    nameOf.set(p.id, p.name);
+    if (p.billedToId !== null && p.billedToName) nameOf.set(p.billedToId, p.billedToName);
+  }
+
+  const payers = await Promise.all(
+    payerIds.map(async (payerId) => {
+      const row = (await loadLedger(payerId)).perGame.find((g) => g.gameId === gameId);
+      return {
+        id: payerId,
+        name: nameOf.get(payerId) ?? "Unknown",
+        total: row?.charge ?? 0,
+        paid: row?.paid ?? 0,
+        due: row?.due ?? 0,
+        lines: row?.lines ?? [],
+      };
+    }),
+  );
+  payers.sort((a, b) => a.name.localeCompare(b.name));
+  return { game, payers, guests: game.players.filter((p) => p.guest).map((p) => p.name) };
+}
+
 // ---- dashboard ------------------------------------------------------------
 
 export async function getDashboard() {
@@ -177,6 +259,10 @@ export async function getDashboard() {
 
 // ---- share links (public: no requireAdmin, token is the credential) --------
 
+export function newToken() {
+  return randomBytes(18).toString("base64url");
+}
+
 export async function getGroupToken() {
   await requireAdmin();
   const existing = await readSetting("group_token");
@@ -186,11 +272,8 @@ export async function getGroupToken() {
   return (await readSetting("group_token")) ?? token;
 }
 
-export function newToken() {
-  return randomBytes(18).toString("base64url");
-}
-
-// Games with player names and costs only: never balances or who has paid.
+// Everyone who played, their share, and a guest tag. It deliberately omits
+// balances, payments and who a share was transferred to.
 export async function getGroupShare(token: string) {
   const stored = await readSetting("group_token");
   if (!stored || !safeEqual(token, stored)) return null;
@@ -203,8 +286,9 @@ export async function getGroupShare(token: string) {
       note: g.note,
       items: g.items.map(({ label, amount }) => ({ label, amount })),
       total: g.total,
+      headcount: g.headcount,
       perHead: g.perHead,
-      playerNames: g.players.map((p) => p.name),
+      people: g.players.map((p) => ({ name: p.name, guest: p.guest, amount: p.guest ? null : p.charge })),
     })),
   };
 }

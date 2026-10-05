@@ -12,7 +12,7 @@ export default async function NewGamePage() {
       <h1 className="text-2xl font-semibold">New game</h1>
       <GameForm
         players={players}
-        initial={{ playedOn: todayISO(), note: "", items: [{ label: "Turf", amount: "" }], playerIds: [] }}
+        initial={{ playedOn: todayISO(), note: "", items: [{ label: "Turf", amount: "" }], attendees: [] }}
       />
     </div>
   );

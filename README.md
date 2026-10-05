@@ -16,11 +16,11 @@ Every week a group of us rents a turf. One person pays the ground, then collects
 
 | Area | What it does |
 |---|---|
-| **Games** | Any number of cost items per game (turf, drinks, vest washing…). Tick who played; a live preview shows `7 players → ৳429 each`. Edit or delete later. |
-| **Split** | `ceil(total ÷ players who played)`. Absent players are never charged. The per-game surplus from rounding up is shown, never hidden. |
-| **Payments** | One-tap *Mark paid* records a player's full balance (two taps, to prevent accidental taps). A separate amount box handles partial payments. Any payment can be undone. |
+| **Games** | Any number of cost items per game (turf, drinks, vest washing…). Tick who played and choose how each person pays: their own share, **guest** (free), or **covered by** another player. A live preview shows `7 players → ৳429 each` and who is billed for whom. Edit or delete later. |
+| **Split** | `ceil(total ÷ paying players)`. Absent players are never charged. **Guests** are excluded from the headcount, so the others split the cost; they're still listed, tagged *guest*. A **covered** share still counts in the headcount but is billed to a sponsor (who needn't be playing). The rounding surplus is shown, never hidden. |
+| **Payments** | On each game's page the organiser sees who owes for that game, with a one-tap *Mark paid* (two taps, to prevent accidents) and a *Partial* amount box. The dashboard has a full-balance *Mark paid* too. Any payment can be undone. |
 | **Dashboard** | Total outstanding, total collected, and who owes, biggest first, each with *Copy message* (a ready-to-paste reminder with the amount, bKash number and the player's link). |
-| **Sharing** | A group link (games, costs, who played — no balances) and a personal link per player (that player's balance only). Both rotate on demand. |
+| **Sharing** | A group link (every game with each person's share and a *guest* tag — no balances, no payment status, no transfers) and a personal link per player (that player's balance only, including anyone they cover). Both rotate on demand. |
 | **Export** | Download players, games, charges, payments and balances as CSV, so the records don't depend on one database. |
 | **PWA** | Installable to the home screen, opens full-screen, and shows a friendly offline page when there's no signal. |
 
@@ -72,11 +72,14 @@ erDiagram
         int game_id PK, FK
         int player_id PK, FK
         int charge
+        bool is_guest
+        int billed_to_id FK
     }
     payments {
         int id PK
         int player_id FK
         int amount
+        int game_id FK
         date paid_on
         text note
     }
@@ -93,14 +96,20 @@ erDiagram
 
 The key idea is that **balances are never stored**. A player's balance is always `sum(charges) − sum(payments)`, computed on read. That makes mistakes fixable (undo a payment, edit a game) with no balance field to drift out of sync.
 
-- `game_players.charge` is fixed at save time, so history doesn't shift if the formula ever changes. Editing a game regenerates its charges.
-- `payments` aren't tied to a game: a payment just reduces the running balance, so "paid two games at once" and "paid half" need no special cases.
+- `game_players.charge` is each attendee's share, fixed at save time, so history doesn't shift if the formula ever changes. Editing a game regenerates its charges.
+- `game_players.billed_to_id` transfers a share to another player (null = they pay it themselves), and `is_guest` marks a free player excluded from the headcount. A player's balance sums the charges **billed to** them, which is how a sponsor ends up owing for people who never owe anything themselves. CHECK constraints stop a guest being charged or billed, and a player covering themselves.
+- A payment reduces the running balance, so "paid two games at once" and "paid half" need no special cases. `payments.game_id` is optional: *Mark paid* on a game's page records the payment against that game.
 - Players with history can't be deleted (`ON DELETE RESTRICT`); they are archived.
 - CHECK constraints keep amounts positive at the database level too.
 
 ### How a multi-game balance is displayed
 
-Because payments aren't tied to games, the personal page needs a rule for *which* games a payment covered. Payments are applied **oldest game first** (`src/lib/ledger.ts`). If someone owes ৳430 for each of 3 games and pays ৳500, game 1 is paid, game 2 shows ৳360 left, game 3 is untouched. This is only a display rule — the total owed is always the true ledger balance.
+Payments need a rule for *which* games they covered, so the per-game status is derived (`src/lib/ledger.ts`), in two steps:
+
+1. A payment tied to a game (from that game's page) settles **that game first**. Anything beyond what's due there spills into a general pool.
+2. Untied payments and spill-over fill the **oldest unpaid game first**.
+
+If someone owes ৳430 for each of 3 games and the organiser taps *Mark paid* on game 3, game 3 is settled while games 1 and 2 stay unpaid. If they instead pay ৳500 with no game chosen, game 1 is paid and game 2 shows ৳360 left. Several charge lines in one game (a sponsor's own share plus the people they cover) are summed. This is only a display rule — the total owed is always the true ledger balance.
 
 ### Security model
 
@@ -108,7 +117,7 @@ Because payments aren't tied to games, the personal page needs a rule for *which
 - **Revocation:** change the password to block new logins; rotate `SESSION_SECRET` to invalidate every existing session at once.
 - **Defence in depth.** `proxy.ts` redirects logged-out visitors before anything renders, **and** every page, server action and route handler calls `requireAdmin()` itself. Layouts are never trusted for auth (they don't re-run on client navigation).
 - **Brute-force lockout:** 5 failed attempts per IP, or 50 globally, in 15 minutes, stored in Postgres (serverless has no shared memory).
-- **Share links** are random 144-bit tokens. The group link's query never loads balances or payments; the personal link's query is scoped to one player. Regenerating a token kills the old link immediately.
+- **Share links** are random 144-bit tokens. The group link's query never loads balances, payments or who a share was transferred to; the personal link's query is scoped to one player. Regenerating a token kills the old link immediately.
 - **CSV export** neutralises spreadsheet formula injection (`=`, `+`, `-`, `@` prefixes in text cells).
 
 ### PWA
@@ -205,7 +214,9 @@ It's a personal tool, so I treated "market value" as irrelevant and optimised fo
 
 **Round up, and show the leftover.** `ceil(total ÷ players)` guarantees collections ≥ cost. The surplus (at most under ৳1 per head) is surfaced on each game instead of silently absorbed, so the books always reconcile. A property test asserts the invariant (never undercharged, surplus under ৳1 per head) across about 1,500 total/headcount combinations.
 
-**Payments aren't tied to games.** People pay "whatever I owe", not "game 3". Tying payments to games would force the UI to ask which game a payment is for. Untied payments plus an oldest-first display rule give the same clarity on the player's page with no extra input from the organiser — and "Mark paid" becomes a single tap.
+**Payments float, but can target a game.** People usually pay "whatever I owe", not "game 3", so a payment defaults to reducing the running balance, with an oldest-first display rule. Later the organiser wanted a one-tap *Mark paid* on each game; pure floating payments would then have shown the wrong game as settled. So a payment can optionally carry a `game_id`, which settles that game first, and the rest still floats. The change was additive and the balance maths didn't move.
+
+**Guests and transfers are billing, not special cases.** Some weeks a guest plays free and the others split the cost; other weeks the boss, or a player bringing a friend, covers someone. Instead of adjustments or negative payments, each attendee row says whether it is a guest (excluded from the headcount) and who it is billed to. The split stays one pure function (`computeCharges`), and a player's balance is simply what is billed to them. Public pages show each person's share and a *guest* tag but never who covered whom.
 
 **Env-var password instead of an auth provider.** There is exactly one admin. A user table, OAuth and password reset would be more surface area than the whole rest of the app. A password in an environment variable, a signed cookie, and a lockout table cover the threat model (someone guessing a URL), and revocation is two env vars. I evaluated Neon Auth with Google sign-in for players and deliberately deferred it: it only pays off if players can *do* something after logging in (for example an "I've paid" button), and it adds a Google Cloud setup and iOS-PWA redirect quirks.
 
@@ -224,7 +235,7 @@ It's a personal tool, so I treated "market value" as irrelevant and optimised fo
 
 ## How I tested it
 
-- **Unit tests (25)** on the pure logic where mistakes cost money or trust: the split and rounding (including the no-undercharge property), oldest-first payment allocation (partial, over-payment, unsorted input), session signing (tampered, wrong-secret and expired tokens), and CSV encoding (quoting, formula injection, non-Latin names).
+- **Unit tests (37)** on the pure logic where mistakes cost money or trust: the split and rounding (including the no-undercharge property, also with guests), guest and transfer billing (the worked example, invalid combinations), payment allocation (partial, over-payment, game-tied payments, several charge lines per game), session signing (tampered, wrong-secret and expired tokens), and CSV encoding (quoting, formula injection, non-Latin names).
 - **Live checks against a real Neon database during development**, covering the full flow: multi-item games, absent players, bad input, one-tap and partial payments, undo, game edits regenerating charges, and both share pages including token rotation. The group-page payload was asserted not to contain balance or payment data.
 - **Black-box probes of the production build** for auth boundaries (logged-out, forged and wrong-secret cookies all get a 307), the PWA files and headers, and the CSV downloads.
 

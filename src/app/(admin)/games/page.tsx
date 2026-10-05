@@ -30,8 +30,9 @@ export default async function GamesPage() {
                 {g.items.map((i) => `${i.label} ${formatTaka(i.amount)}`).join(" · ")}
               </p>
               <p className={muted}>
-                {g.players.length} players × {formatTaka(g.perHead)}
+                {g.headcount} paying × {formatTaka(g.perHead)}
                 {g.surplus > 0 && ` (${formatTaka(g.surplus)} over)`}
+                {g.players.some((p) => p.guest) && ` · ${g.players.filter((p) => p.guest).length} guest`}
               </p>
             </Link>
           </li>

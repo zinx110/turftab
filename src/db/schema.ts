@@ -54,7 +54,9 @@ export const gameItems = pgTable(
   ],
 );
 
-// One row per player who actually played. `charge` is fixed at save time.
+// One row per player who actually played. `charge` is that player's share,
+// fixed at save time. Guests play free (charge 0, excluded from the split).
+// `billedToId` transfers the share to another player; null = they pay it.
 export const gamePlayers = pgTable(
   "game_players",
   {
@@ -66,15 +68,21 @@ export const gamePlayers = pgTable(
       .notNull()
       .references(() => players.id, { onDelete: "restrict" }),
     charge: integer("charge").notNull(),
+    isGuest: boolean("is_guest").notNull().default(false),
+    billedToId: integer("billed_to_id").references(() => players.id, { onDelete: "restrict" }),
   },
   (t) => [
     primaryKey({ columns: [t.gameId, t.playerId] }),
     index("game_players_player_idx").on(t.playerId),
+    index("game_players_billed_to_idx").on(t.billedToId),
     check("game_players_charge_nonneg", sql`${t.charge} >= 0`),
+    check("game_players_guest_is_free", sql`not ${t.isGuest} or (${t.charge} = 0 and ${t.billedToId} is null)`),
+    check("game_players_no_self_transfer", sql`${t.billedToId} is null or ${t.billedToId} <> ${t.playerId}`),
   ],
 );
 
-// Not tied to a game: a payment just reduces the player's running balance.
+// A payment reduces the player's running balance. `gameId` is optional: set
+// when "Mark paid" is used on a specific game, so that game is settled first.
 export const payments = pgTable(
   "payments",
   {
@@ -83,6 +91,7 @@ export const payments = pgTable(
       .notNull()
       .references(() => players.id, { onDelete: "restrict" }),
     amount: integer("amount").notNull(),
+    gameId: integer("game_id").references(() => games.id, { onDelete: "set null" }),
     paidOn: date("paid_on").notNull(),
     note: text("note"),
     createdAt: timestamp("created_at", { withTimezone: true })

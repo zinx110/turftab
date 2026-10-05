@@ -40,8 +40,15 @@ export default async function PlayerSharePage({ params }: { params: Promise<{ to
           <h2 className="font-medium">Games you owe for</h2>
           <ul className="flex flex-col gap-2">
             {unpaid.map((g) => (
-              <li key={g.gameId} className={`${card} flex items-center justify-between`}>
-                <span>{formatDate(g.playedOn)}</span>
+              <li key={g.gameId} className={`${card} flex items-center justify-between gap-3`}>
+                <span>
+                  <span className="block">{formatDate(g.playedOn)}</span>
+                  {(g.lines.length > 1 || g.lines.some((l) => !l.own)) && (
+                    <span className={`${muted} block`}>
+                      {g.lines.map((l) => (l.own ? "your share" : `${l.forName}'s share`)).join(" + ")}
+                    </span>
+                  )}
+                </span>
                 <span className="font-semibold">
                   {money(g.due)}
                   {g.paid > 0 && <span className={`${muted} font-normal`}> (of {money(g.charge)})</span>}

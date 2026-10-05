@@ -8,6 +8,13 @@
       "when": 1791107727712,
       "tag": "0000_mixed_katie_power",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1791180970320,
+      "tag": "0001_solid_wolfsbane",
+      "breakpoints": true
     }
   ]
 }

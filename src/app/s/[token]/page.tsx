@@ -7,8 +7,9 @@ import { getGroupShare } from "@/lib/data";
 
 export const metadata: Metadata = { title: "TurfTab games", robots: { index: false, follow: false } };
 
-// Public, token-protected. Shows games, costs and who played. It deliberately
-// never loads balances or payments.
+// Public, token-protected. Shows games, costs, everyone who played and their
+// share, with a guest tag. It deliberately never loads balances, payments or
+// who covered whom.
 export default async function GroupSharePage({ params }: { params: Promise<{ token: string }> }) {
   const data = await getGroupShare((await params).token);
   if (!data) notFound();
@@ -34,9 +35,22 @@ export default async function GroupSharePage({ params }: { params: Promise<{ tok
               ))}
             </ul>
             <p className="mt-2 text-sm font-medium">
-              {g.playerNames.length} played × {money(g.perHead)} each
+              {g.headcount} paying × {money(g.perHead)} each
             </p>
-            <p className={muted}>{g.playerNames.join(", ")}</p>
+            <ul className="mt-1 text-sm">
+              {g.people.map((person, idx) => (
+                <li key={idx} className="flex items-center justify-between py-0.5">
+                  <span>{person.name}</span>
+                  {person.guest ? (
+                    <span className="rounded-full border border-black/15 px-2 py-0.5 text-xs dark:border-white/20">
+                      guest
+                    </span>
+                  ) : (
+                    <span>{money(person.amount ?? 0)}</span>
+                  )}
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>
