@@ -1,13 +1,13 @@
 "use server";
 
-import { eq, sql } from "drizzle-orm";
+import { and, eq, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { gameItems, gamePlayers, games } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
-import { getPlayersByIds } from "@/lib/data";
+import { getPlayersByIds, getShareState } from "@/lib/data";
 import { computeCharges } from "@/lib/money";
 
 const attendee = z.object({
@@ -98,4 +98,34 @@ export async function deleteGame(id: number) {
   await db().delete(games).where(eq(games.id, id)); // items + attendance cascade
   revalidatePath("/", "layout");
   redirect("/games");
+}
+
+// Move one attendee's share to another player (or back to the attendee when
+// `toId` is null). Only allowed while none of it has been paid: once a share
+// is paid, it is settled for that person and stays put.
+export async function moveShare(gameId: number, forId: number, toId: number | null) {
+  await requireAdmin();
+  const ids = z.object({ gameId: z.number().int().positive(), forId: z.number().int().positive() });
+  if (!ids.safeParse({ gameId, forId }).success || (toId !== null && !Number.isInteger(toId))) {
+    return { error: "Invalid request." };
+  }
+
+  const state = await getShareState(gameId, forId);
+  if (!state) return { error: "That player wasn't in this game." };
+  if (state.guest) return { error: "Guests don't pay, so there's nothing to move." };
+
+  const target = toId === null || toId === forId ? null : toId; // null = the attendee pays it themselves
+  if (target === state.billedToId) return { error: "It's already billed to that player." };
+  if (target !== null) {
+    if ((await getPlayersByIds([target])).length !== 1) return { error: "That player no longer exists." };
+    if (state.guestIds.includes(target)) return { error: "That player is a guest in this game." };
+  }
+  if (state.paid > 0) return { error: "This share is already paid, so it can't be moved." };
+
+  await db()
+    .update(gamePlayers)
+    .set({ billedToId: target })
+    .where(and(eq(gamePlayers.gameId, gameId), eq(gamePlayers.playerId, forId)));
+  revalidatePath("/", "layout");
+  return {};
 }

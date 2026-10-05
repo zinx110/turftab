@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocatePayments } from "./ledger";
+import { allocatePayments, allocateToLines } from "./ledger";
 
 const g = (gameId: number, playedOn: string, charge = 430) => ({ gameId, playedOn, charge });
 
@@ -104,5 +104,50 @@ describe("allocatePayments with game-tied payments", () => {
     const r = allocatePayments(three, pays);
     const due = r.games.reduce((s, x) => s + x.due, 0);
     expect(due - r.credit).toBe(1290 - 850);
+  });
+});
+
+describe("allocateToLines", () => {
+  const own = { forId: 1, forName: "Boss", charge: 430, own: true };
+  const rafid = { forId: 2, forName: "Rafid", charge: 430, own: false };
+  const anik = { forId: 3, forName: "Anik", charge: 430, own: false };
+
+  it("nothing paid: every share is movable", () => {
+    const r = allocateToLines([rafid, own], 0);
+    expect(r.map((l) => [l.forName, l.paid, l.movable])).toEqual([["Boss", 0, true], ["Rafid", 0, true]]);
+  });
+
+  it("pays their own share first, so a covered share is still movable", () => {
+    const r = allocateToLines([anik, rafid, own], 430);
+    expect(r.map((l) => [l.forName, l.paid, l.movable])).toEqual([
+      ["Boss", 430, false], // own share settled
+      ["Anik", 0, true],
+      ["Rafid", 0, true],
+    ]);
+  });
+
+  it("then covered shares alphabetically; a part-paid share is not movable", () => {
+    const r = allocateToLines([rafid, anik, own], 500);
+    expect(r.map((l) => [l.forName, l.paid, l.due, l.movable])).toEqual([
+      ["Boss", 430, 0, false],
+      ["Anik", 70, 360, false], // part paid -> locked
+      ["Rafid", 0, 430, true],
+    ]);
+  });
+
+  it("a sponsor who isn't playing has only covered shares", () => {
+    const r = allocateToLines([rafid, anik], 430);
+    expect(r.map((l) => [l.forName, l.movable])).toEqual([["Anik", false], ["Rafid", true]]);
+  });
+
+  it("fully paid: nothing is movable", () => {
+    expect(allocateToLines([own, rafid], 860).every((l) => !l.movable && l.due === 0)).toBe(true);
+  });
+
+  it("paid amounts always add up", () => {
+    for (const paid of [0, 1, 429, 430, 431, 860, 1290, 5000]) {
+      const r = allocateToLines([own, rafid, anik], paid);
+      expect(r.reduce((s, l) => s + l.paid, 0)).toBe(Math.min(paid, 1290));
+    }
   });
 });

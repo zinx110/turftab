@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CopyButton } from "@/components/copy-button";
+import { MoveShare } from "@/components/move-share";
 import {
   ArchiveButton,
   DeletePaymentButton,
@@ -11,16 +12,36 @@ import {
 import { card, muted } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
-import { getPlayerDetail } from "@/lib/data";
+import { getActivePlayers, getPlayerDetail } from "@/lib/data";
 import { formatTaka } from "@/lib/money";
 
 export default async function PlayerPage({ params }: { params: Promise<{ id: string }> }) {
   await requireAdmin();
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const detail = await getPlayerDetail(id);
+  const [detail, activePlayers] = await Promise.all([getPlayerDetail(id), getActivePlayers()]);
   if (!detail) notFound();
-  const { player, perGame, payments, balance, charged, paid } = detail;
+  const { player, perGame, payments, balance, charged, paid, coveredAway, guestsByGame } = detail;
+
+  // One card per game: what this player owes (if anything) and any share of
+  // theirs that someone else is covering.
+  type GameCard = {
+    gameId: number;
+    playedOn: string;
+    payer?: (typeof perGame)[number];
+    away?: (typeof coveredAway)[number];
+  };
+  const cards = new Map<number, GameCard>();
+  for (const g of perGame) cards.set(g.gameId, { gameId: g.gameId, playedOn: g.playedOn, payer: g });
+  for (const a of coveredAway) {
+    cards.set(a.gameId, { ...(cards.get(a.gameId) ?? { gameId: a.gameId, playedOn: a.playedOn }), away: a });
+  }
+  const ordered = [...cards.values()].sort((a, b) => b.playedOn.localeCompare(a.playedOn) || b.gameId - a.gameId);
+
+  // Who a share can be moved to: anyone active except its owner, its current
+  // payer, and guests in that game.
+  const optionsFor = (gameId: number, forId: number, currentPayerId: number | null) =>
+    activePlayers.filter((p) => p.id !== forId && p.id !== currentPayerId && !(guestsByGame[gameId] ?? []).includes(p.id));
 
   return (
     <div className="flex flex-col gap-6">
@@ -49,26 +70,67 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
       <section className="flex flex-col gap-2">
         <h2 className="font-medium">Games</h2>
-        {perGame.length === 0 && <p className={muted}>No games yet.</p>}
+        {ordered.length === 0 && <p className={muted}>No games yet.</p>}
         <ul className="flex flex-col gap-2">
-          {[...perGame].reverse().map((g) => (
-            <li key={g.gameId} className={`${card} flex items-center justify-between`}>
-              <span>
-                <Link href={`/games/${g.gameId}`} className="block">
-                  {formatDate(g.playedOn)}
+          {ordered.map(({ gameId, playedOn, payer, away }) => (
+            <li key={gameId} className={`${card} flex flex-col gap-2`}>
+              <div className="flex items-start justify-between gap-3">
+                <Link href={`/games/${gameId}`} className="font-medium">
+                  {formatDate(playedOn)}
                 </Link>
-                {(g.lines.length > 1 || g.lines.some((l) => !l.own)) && (
-                  <span className={`${muted} block`}>
-                    {g.lines.map((l) => (l.own ? "own share" : `for ${l.forName}`)).join(" + ")}
+                {payer ? (
+                  <span className="text-right">
+                    <span className="block font-medium">{formatTaka(payer.charge)}</span>
+                    <span className={payer.due === 0 ? "text-sm text-emerald-600" : "text-sm text-red-600"}>
+                      {payer.due === 0 ? "paid" : payer.paid > 0 ? `${formatTaka(payer.due)} left` : "unpaid"}
+                    </span>
                   </span>
+                ) : (
+                  <span className={muted}>nothing to pay</span>
                 )}
-              </span>
-              <span className="text-right">
-                <span className="block font-medium">{formatTaka(g.charge)}</span>
-                <span className={g.due === 0 ? "text-sm text-emerald-600" : "text-sm text-red-600"}>
-                  {g.due === 0 ? "paid" : g.paid > 0 ? `${formatTaka(g.due)} left` : "unpaid"}
-                </span>
-              </span>
+              </div>
+
+              {payer && (payer.lines.length > 1 || payer.lines.some((l) => l.movable || !l.own)) && (
+                <ul className="flex flex-col gap-1 text-sm">
+                  {payer.lines.map((l) => (
+                    <li key={l.forId} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                      <span>
+                        {l.own ? "Own share" : `For ${l.forName}`} · {formatTaka(l.charge)}
+                        {l.due === 0 ? " · paid" : l.paid > 0 ? " · part paid" : ""}
+                      </span>
+                      {l.movable && (
+                        <MoveShare
+                          gameId={gameId}
+                          forId={l.forId}
+                          forName={l.forName}
+                          options={optionsFor(gameId, l.forId, l.own ? null : player.id)}
+                          canReset={!l.own}
+                        />
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {away && (
+                <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
+                  <span>
+                    Covered by {away.billedToName} · {formatTaka(away.charge)}
+                  </span>
+                  {away.movable ? (
+                    <MoveShare
+                      gameId={gameId}
+                      forId={player.id}
+                      forName={player.name}
+                      options={optionsFor(gameId, player.id, away.billedToId)}
+                      canReset
+                      label="Change"
+                    />
+                  ) : (
+                    <span className={muted}>settled</span>
+                  )}
+                </div>
+              )}
             </li>
           ))}
         </ul>

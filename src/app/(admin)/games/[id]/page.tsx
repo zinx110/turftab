@@ -1,9 +1,10 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { GameCollectRow } from "@/components/game-collect-row";
+import { MoveShare } from "@/components/move-share";
 import { btnGhost, card, muted } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
-import { getGameCollect } from "@/lib/data";
+import { getActivePlayers, getGameCollect } from "@/lib/data";
 import { formatDate } from "@/lib/dates";
 import { formatTaka } from "@/lib/money";
 
@@ -11,9 +12,10 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
   await requireAdmin();
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const data = await getGameCollect(id);
+  const [data, activePlayers] = await Promise.all([getGameCollect(id), getActivePlayers()]);
   if (!data) notFound();
-  const { game, payers, guests } = data;
+  const { game, payers, covered, guests } = data;
+  const guestIds = guests.map((g) => g.id);
 
   const collected = payers.reduce((s, p) => s + p.paid, 0);
   const billed = payers.reduce((s, p) => s + p.total, 0);
@@ -61,7 +63,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         </div>
         <ul className="flex flex-col gap-2">
           {payers.map((p) => (
-            <GameCollectRow key={p.id} gameId={game.id} payer={p} />
+            <GameCollectRow key={p.id} gameId={game.id} payer={p} players={activePlayers} guestIds={guestIds} />
           ))}
         </ul>
         <p className={muted}>
@@ -69,10 +71,37 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         </p>
       </section>
 
+      {covered.length > 0 && (
+        <section className="flex flex-col gap-2">
+          <h2 className="font-medium">Covered by others</h2>
+          <ul className="flex flex-col gap-2">
+            {covered.map((c) => (
+              <li key={c.id} className={`${card} flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm`}>
+                <span>
+                  {c.name} · {formatTaka(c.charge)} · covered by {c.billedToName}
+                </span>
+                {c.movable ? (
+                  <MoveShare
+                    gameId={game.id}
+                    forId={c.id}
+                    forName={c.name}
+                    options={activePlayers.filter((p) => p.id !== c.id && p.id !== c.billedToId && !guestIds.includes(p.id))}
+                    canReset
+                    label="Change"
+                  />
+                ) : (
+                  <span className={muted}>settled</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
       {guests.length > 0 && (
         <section className="flex flex-col gap-1">
           <h2 className="font-medium">Guests (free)</h2>
-          <p className={muted}>{guests.join(", ")}</p>
+          <p className={muted}>{guests.map((g) => g.name).join(", ")}</p>
         </section>
       )}
     </div>

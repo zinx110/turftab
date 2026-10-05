@@ -1,10 +1,10 @@
 import { randomBytes } from "node:crypto";
-import { and, asc, desc, eq, gt, inArray, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
 import { gameItems, gamePlayers, games, payments, players, settings } from "@/db/schema";
 import { requireAdmin } from "./auth";
-import { allocatePayments } from "./ledger";
+import { allocatePayments, allocateToLines } from "./ledger";
 import { perHeadCharge } from "./money";
 import { safeEqual } from "./session";
 
@@ -141,12 +141,16 @@ async function loadLedger(playerId: number) {
     chargeRows,
     paymentRows.map((p) => ({ amount: p.amount, gameId: p.gameId })),
   );
-  // Attach what each game's charge is made of (own share, people covered).
+  // Attach what each game's charge is made of (own share, people covered),
+  // and how much of each share is paid, which decides if it can still move.
   const perGame = allocated.map((g) => ({
     ...g,
-    lines: chargeRows
-      .filter((c) => c.gameId === g.gameId)
-      .map((c) => ({ forId: c.forId, forName: c.forName, charge: c.charge, own: c.forId === playerId })),
+    lines: allocateToLines(
+      chargeRows
+        .filter((c) => c.gameId === g.gameId)
+        .map((c) => ({ forId: c.forId, forName: c.forName, charge: c.charge, own: c.forId === playerId })),
+      g.paid,
+    ),
   }));
   return { perGame, credit, payments: paymentRows, charged, paid, balance: charged - paid };
 }
@@ -185,11 +189,76 @@ export async function getPlayersWithBalances() {
   });
 }
 
+// Guests per game, so the "move share" picker never offers one as a payer.
+async function guestIdsByGame(gameIds: number[]) {
+  const map: Record<number, number[]> = {};
+  if (gameIds.length === 0) return map;
+  const rows = await db()
+    .select({ gameId: gamePlayers.gameId, playerId: gamePlayers.playerId })
+    .from(gamePlayers)
+    .where(and(inArray(gamePlayers.gameId, gameIds), eq(gamePlayers.isGuest, true)));
+  for (const r of rows) (map[r.gameId] ??= []).push(r.playerId);
+  return map;
+}
+
 export async function getPlayerDetail(id: number) {
   await requireAdmin();
   const [player] = await db().select().from(players).where(eq(players.id, id));
   if (!player) return null;
-  return { player, ...(await loadLedger(id)) };
+  const ledger = await loadLedger(id);
+
+  // Games this player played where someone else is covering their share.
+  const billedTo = alias(players, "billed_to");
+  const away = await db()
+    .select({
+      gameId: gamePlayers.gameId,
+      playedOn: games.playedOn,
+      charge: gamePlayers.charge,
+      billedToId: gamePlayers.billedToId,
+      billedToName: billedTo.name,
+    })
+    .from(gamePlayers)
+    .innerJoin(games, eq(games.id, gamePlayers.gameId))
+    .innerJoin(billedTo, eq(billedTo.id, gamePlayers.billedToId))
+    .where(and(eq(gamePlayers.playerId, id), isNotNull(gamePlayers.billedToId)));
+
+  // A covered share can only move while its payer hasn't paid any of it.
+  const payerLedgers = new Map<number, Awaited<ReturnType<typeof loadLedger>>>();
+  for (const a of away) {
+    if (a.billedToId !== null && !payerLedgers.has(a.billedToId)) {
+      payerLedgers.set(a.billedToId, await loadLedger(a.billedToId));
+    }
+  }
+  const coveredAway = away.map((a) => {
+    const line = payerLedgers
+      .get(a.billedToId!)
+      ?.perGame.find((g) => g.gameId === a.gameId)
+      ?.lines.find((l) => l.forId === id);
+    return { ...a, billedToId: a.billedToId!, movable: line ? line.movable : false };
+  });
+
+  const gameIds = [...new Set([...ledger.perGame.map((g) => g.gameId), ...coveredAway.map((a) => a.gameId)])];
+  return { player, ...ledger, coveredAway, guestsByGame: await guestIdsByGame(gameIds) };
+}
+
+// Everything the "move share" action needs to know about one attendee's share.
+export async function getShareState(gameId: number, forId: number) {
+  await requireAdmin();
+  const [row] = await db()
+    .select()
+    .from(gamePlayers)
+    .where(and(eq(gamePlayers.gameId, gameId), eq(gamePlayers.playerId, forId)));
+  if (!row) return null;
+  const payerId = row.billedToId ?? row.playerId;
+  const line = (await loadLedger(payerId)).perGame
+    .find((g) => g.gameId === gameId)
+    ?.lines.find((l) => l.forId === forId);
+  return {
+    guest: row.isGuest,
+    billedToId: row.billedToId,
+    paid: line?.paid ?? 0,
+    guestIds: (await guestIdsByGame([gameId]))[gameId] ?? [],
+  };
 }
 
 export async function getActivePlayers() {
@@ -239,7 +308,30 @@ export async function getGameCollect(gameId: number) {
     }),
   );
   payers.sort((a, b) => a.name.localeCompare(b.name));
-  return { game, payers, guests: game.players.filter((p) => p.guest).map((p) => p.name) };
+
+  // People who played but whose share is billed to someone else. The share
+  // can still move while the person covering it hasn't paid any of it.
+  const covered = game.players
+    .filter((p) => !p.guest && p.billedToId !== null)
+    .map((p) => {
+      const payer = payers.find((x) => x.id === p.billedToId);
+      const line = payer?.lines.find((l) => l.forId === p.id);
+      return {
+        id: p.id,
+        name: p.name,
+        charge: p.charge,
+        billedToId: p.billedToId!,
+        billedToName: p.billedToName ?? "Unknown",
+        movable: line ? line.movable : false,
+      };
+    });
+
+  return {
+    game,
+    payers,
+    covered,
+    guests: game.players.filter((p) => p.guest).map((p) => ({ id: p.id, name: p.name })),
+  };
 }
 
 // ---- dashboard ------------------------------------------------------------

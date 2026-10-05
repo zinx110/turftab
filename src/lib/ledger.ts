@@ -52,3 +52,23 @@ export function allocatePayments(charges: ChargeRow[], payments: PaymentRow[] | 
   // anything left over is an advance / overpayment
   return { games, credit: pool };
 }
+
+// ---- shares within one game -------------------------------------------------
+
+export type ShareLine = { forId: number; forName: string; charge: number; own: boolean };
+
+// A payer can owe for several shares in one game (their own plus people they
+// cover). Spread what they've paid for that game across those shares: their
+// own first, then the others alphabetically. A share with nothing paid on it
+// can still be moved to another player; a paid or part-paid share cannot.
+export function allocateToLines<T extends ShareLine>(lines: T[], paid: number) {
+  const ordered = [...lines].sort(
+    (a, b) => Number(b.own) - Number(a.own) || a.forName.localeCompare(b.forName) || a.forId - b.forId,
+  );
+  let remaining = Math.max(paid, 0);
+  return ordered.map((l) => {
+    const linePaid = Math.min(l.charge, remaining);
+    remaining -= linePaid;
+    return { ...l, paid: linePaid, due: l.charge - linePaid, movable: linePaid === 0 };
+  });
+}
