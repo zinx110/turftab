@@ -22,7 +22,7 @@ export default async function GroupSharePage({ params }: { params: Promise<{ tok
       {data.games.length === 0 && <p className={muted}>No games yet.</p>}
       <ul className="flex flex-col gap-4">
         {data.games.map((g) => (
-          <li key={g.id} className={`${card} flex flex-col gap-4`}>
+          <li key={g.id} id={`game-${g.id}`} className={`${card} flex scroll-mt-4 flex-col gap-4`}>
             <div>
               <div className="flex items-baseline justify-between gap-2">
                 <h2 className="font-semibold">{formatDate(g.playedOn)}</h2>
@@ -47,8 +47,8 @@ export default async function GroupSharePage({ params }: { params: Promise<{ tok
                 <p className={sectionTitle}>
                   {g.matches.length} {g.matches.length === 1 ? "match" : "matches"}
                 </p>
-                {g.matches.map((m) => (
-                  <div key={m.number} className="rounded-xl bg-subtle p-3">
+                {g.matches.map((m, i) => (
+                  <div key={`${m.number}-${i}`} className="rounded-xl bg-subtle p-3">
                     <div className="flex items-center justify-between">
                       <p className="text-sm font-semibold">Match {m.number}</p>
                       {m.scoreA !== null && m.scoreB !== null && (

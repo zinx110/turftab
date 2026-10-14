@@ -5,9 +5,10 @@ import { GameCollectRow } from "@/components/game-collect-row";
 import { MoveShare } from "@/components/move-share";
 import { AddMatchButton } from "@/components/add-match-button";
 import { MatchCard } from "@/components/match-card";
+import { ShareLink } from "@/components/share-link";
 import { btnGhost, card, muted, pill, sectionTitle } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
-import { getActivePlayers, getGameCollect } from "@/lib/data";
+import { getActivePlayers, getGameCollect, getGroupToken } from "@/lib/data";
 import { formatDate } from "@/lib/dates";
 import { formatTaka } from "@/lib/money";
 
@@ -15,7 +16,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
   await requireAdmin();
   const id = Number((await params).id);
   if (!Number.isInteger(id)) notFound();
-  const [data, activePlayers] = await Promise.all([getGameCollect(id), getActivePlayers()]);
+  const [data, activePlayers, groupToken] = await Promise.all([getGameCollect(id), getActivePlayers(), getGroupToken()]);
   if (!data) notFound();
   const { game, payers, covered, guests } = data;
   const guestIds = guests.map((g) => g.id);
@@ -60,6 +61,8 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
           {game.surplus > 0 && <span className={pill.gray}>{formatTaka(game.surplus)} over</span>}
         </div>
       </section>
+
+      <ShareLink path={`/s/${groupToken}#game-${game.id}`} />
 
       <section className="flex flex-col gap-5">
         <h2 className={sectionTitle}>Matches</h2>

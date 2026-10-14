@@ -8,6 +8,7 @@ import { payments } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
 import { getGameDue, getPlayerBalance } from "@/lib/data";
 import { todayISO } from "@/lib/dates";
+import { INVALID, validIds } from "@/lib/ids";
 
 const amountSchema = z.number().int().min(1).max(10_000_000);
 
@@ -15,6 +16,7 @@ const amountSchema = z.number().int().min(1).max(10_000_000);
 // balance; with an amount it records a partial (or advance) payment.
 export async function markPaid(playerId: number, amount?: number) {
   await requireAdmin();
+  if (!validIds(playerId)) return INVALID;
   let pay = amount;
   if (pay === undefined) {
     pay = await getPlayerBalance(playerId);
@@ -31,6 +33,7 @@ export async function markPaid(playerId: number, amount?: number) {
 // owes for that game; with an amount it records a partial payment against it.
 export async function markGamePaid(gameId: number, playerId: number, amount?: number) {
   await requireAdmin();
+  if (!validIds(gameId, playerId)) return INVALID;
   let pay = amount;
   if (pay === undefined) {
     pay = await getGameDue(playerId, gameId);
@@ -47,6 +50,7 @@ export async function markGamePaid(gameId: number, playerId: number, amount?: nu
 
 export async function deletePayment(id: number) {
   await requireAdmin();
+  if (!validIds(id)) return;
   await db().delete(payments).where(eq(payments.id, id));
   revalidatePath("/", "layout");
 }

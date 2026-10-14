@@ -7,6 +7,7 @@ import { db } from "@/db";
 import { players } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
 import { newToken } from "@/lib/data";
+import { INVALID, validIds } from "@/lib/ids";
 
 const profile = z.object({
   name: z.string().trim().min(1, "Name is required").max(60),
@@ -27,6 +28,7 @@ export async function createPlayer(input: { name: string; phone?: string }) {
 
 export async function updatePlayer(id: number, input: { name: string; phone?: string }) {
   await requireAdmin();
+  if (!validIds(id)) return INVALID;
   const parsed = profile.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0].message };
   await db()
@@ -39,12 +41,14 @@ export async function updatePlayer(id: number, input: { name: string; phone?: st
 
 export async function setPlayerActive(id: number, active: boolean) {
   await requireAdmin();
+  if (!validIds(id)) return;
   await db().update(players).set({ active }).where(eq(players.id, id));
   revalidatePath("/", "layout");
 }
 
 export async function regeneratePlayerToken(id: number) {
   await requireAdmin();
+  if (!validIds(id)) return;
   await db().update(players).set({ token: newToken() }).where(eq(players.id, id));
   revalidatePath("/", "layout");
 }

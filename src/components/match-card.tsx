@@ -14,7 +14,8 @@ import {
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
-import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
 import {
   addToMatch,
   deleteMatch,
@@ -47,68 +48,68 @@ function PlayerRow({
   onLeave: () => void;
   disabled: boolean;
 }) {
-  const [menu, setMenu] = useState(false);
+  // Trash is two taps (the first arms it) so a stray tap can't remove someone.
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = setTimeout(() => setArmed(false), 3000);
+    return () => clearTimeout(t);
+  }, [armed]);
+
   // Each player is both something you can pick up and a place to drop onto
   // (dropping on a player swaps the two).
   const drag = useDraggable({ id: `p${m.id}`, data: { id: m.id } });
   const drop = useDroppable({ id: `d${m.id}`, data: { id: m.id } });
+  const icon = "size-4";
   return (
     <li
       ref={(el) => {
         drag.setNodeRef(el);
         drop.setNodeRef(el);
       }}
-      className={`rounded-lg transition ${drag.isDragging ? "opacity-30" : ""} ${
+      className={`flex items-center gap-0.5 rounded-lg transition ${drag.isDragging ? "opacity-30" : ""} ${
         drop.isOver && !drag.isDragging ? "bg-emerald-600/15 ring-2 ring-emerald-600/40" : ""
       }`}
     >
-      <div className="flex items-center gap-1">
-        <div
-          {...drag.listeners}
-          {...drag.attributes}
-          aria-label={`${m.name}. Drag to swap or move.`}
-          className="flex min-w-0 flex-1 cursor-grab touch-manipulation select-none items-center gap-2 rounded-lg px-1.5 py-1.5 text-left text-sm active:cursor-grabbing"
-        >
-          <Avatar name={m.name} size="sm" />
-          <span className="min-w-0 flex-1 leading-tight">
-            <span className="block truncate">{m.name}</span>
-            {m.guest && <span className="block text-[11px] font-medium text-amber-700 dark:text-amber-400">guest</span>}
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => setMenu((v) => !v)}
-          aria-label={`Options for ${m.name}`}
-          aria-expanded={menu}
-          className="shrink-0 rounded-lg p-1.5 text-foreground/45 transition hover:bg-subtle hover:text-foreground"
-        >
-          <svg viewBox="0 0 24 24" className="size-4" fill="currentColor" aria-hidden>
-            <circle cx="5" cy="12" r="1.8" />
-            <circle cx="12" cy="12" r="1.8" />
-            <circle cx="19" cy="12" r="1.8" />
-          </svg>
-        </button>
+      <div
+        {...drag.listeners}
+        {...drag.attributes}
+        aria-label={`${m.name}. Drag to swap or move.`}
+        className="flex min-w-0 flex-1 cursor-grab touch-manipulation select-none items-center gap-2 rounded-lg px-2 py-2 text-left text-sm active:cursor-grabbing"
+      >
+        <span className="min-w-0 flex-1 leading-tight">
+          <span className="block truncate">{m.name}</span>
+          {m.guest && <span className="block text-[11px] font-medium text-amber-700 dark:text-amber-400">guest</span>}
+        </span>
       </div>
-      {menu && (
-        <div className="mb-1 ml-9 flex flex-wrap gap-1.5">
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => { setMenu(false); onSwitch(); }}
-            className="rounded-lg border border-line px-2 py-1 text-xs font-medium hover:bg-subtle disabled:opacity-50"
-          >
-            Switch team
-          </button>
-          <button
-            type="button"
-            disabled={disabled}
-            onClick={() => { setMenu(false); onLeave(); }}
-            className="rounded-lg border border-red-600/30 px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-600/5 disabled:opacity-50"
-          >
-            Left early
-          </button>
-        </div>
-      )}
+      <button
+        type="button"
+        onClick={onSwitch}
+        disabled={disabled}
+        aria-label={`Move ${m.name} to the other team`}
+        className="shrink-0 rounded-lg p-1 text-foreground/50 transition hover:bg-subtle hover:text-foreground disabled:opacity-40"
+      >
+        <svg viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M7 4 3 8l4 4M3 8h14M17 20l4-4-4-4M21 16H7" />
+        </svg>
+      </button>
+      <button
+        type="button"
+        onClick={() => {
+          if (!armed) return setArmed(true);
+          setArmed(false);
+          onLeave();
+        }}
+        disabled={disabled}
+        aria-label={armed ? `Confirm: remove ${m.name} from this match` : `Remove ${m.name} from this match`}
+        className={`shrink-0 rounded-lg p-1 transition disabled:opacity-40 ${
+          armed ? "bg-red-600 text-white" : "text-foreground/50 hover:bg-red-600/10 hover:text-red-600"
+        }`}
+      >
+        <svg viewBox="0 0 24 24" className={icon} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
+        </svg>
+      </button>
     </li>
   );
 }
@@ -120,7 +121,7 @@ function TeamColumn(props: { team: Team; members: Member[]; onSwitch: (m: Member
   return (
     <div ref={setNodeRef} className={`${card} overflow-hidden p-0 transition ${isOver ? `ring-2 ${s.over}` : ""}`}>
       <div className={`h-1.5 ${s.bar}`} />
-      <div className="min-h-24 p-2.5">
+      <div className="min-h-24 p-2">
         <p className={`flex items-baseline justify-between px-1.5 font-semibold ${s.text}`}>
           {s.name}
           <span className="text-xs font-medium text-foreground/50">{members.length}</span>
@@ -151,6 +152,7 @@ export function MatchCard({
   const [active, setActive] = useState<Member | null>(null);
   const [pick, setPick] = useState("");
   const [pending, start] = useTransition();
+  const router = useRouter();
 
   // Show changes immediately, and re-sync whenever the server sends fresh data.
   const [seen, setSeen] = useState(match.players);
@@ -166,6 +168,10 @@ export function MatchCard({
     useSensor(KeyboardSensor),
   );
 
+  const clean = (v: string) => {
+    const digits = v.replace(/\D/g, "").slice(0, 2);
+    return digits === "" ? "" : String(Number(digits)); // no leading zeros
+  };
   const dirty = a !== (match.scoreA === null ? "" : String(match.scoreA)) || b !== (match.scoreB === null ? "" : String(match.scoreB));
   const other = (t: Team): Team => (t === "A" ? "B" : "A");
 
@@ -174,11 +180,17 @@ export function MatchCard({
     setMembers(optimistic);
     setError(undefined);
     start(async () => {
-      const r = await action();
-      if (r.error) {
+      try {
+        const r = await action();
+        if (!r.error) return;
         setMembers(previous); // undo the change
         setError(r.error);
+      } catch {
+        // network drop or an expired session: don't leave a layout that wasn't saved
+        setMembers(previous);
+        setError("Couldn't save that. Check your connection and try again.");
       }
+      router.refresh(); // show what the server actually has
     });
   }
 
@@ -211,11 +223,17 @@ export function MatchCard({
 
   function submitScore(e: React.FormEvent) {
     e.preventDefault();
+    // a blank side is null, never 0, so a half-filled score is rejected
+    // instead of being saved as e.g. 3:0
+    const toScore = (v: string) => (v === "" ? null : Number(v));
     start(async () => {
-      const clear = a === "" && b === "";
-      const r = await saveScore(match.id, clear ? null : Number(a), clear ? null : Number(b));
-      setError(r.error);
-      setSaved(!r.error);
+      try {
+        const r = await saveScore(match.id, toScore(a), toScore(b));
+        setError(r.error);
+        setSaved(!r.error);
+      } catch {
+        setError("Couldn't save the score. Check your connection and try again.");
+      }
     });
   }
 
@@ -242,13 +260,15 @@ export function MatchCard({
             </span>
           )}
         </h3>
-        <ConfirmButton label="Shuffle" confirmLabel="Re-draw teams?" className={btnGhost} onConfirm={() => shuffleTeams(match.id)} />
+        {members.length > 1 && (
+          <ConfirmButton label="Shuffle" confirmLabel="Re-draw teams?" className={btnGhost} onConfirm={() => shuffleTeams(match.id)} />
+        )}
       </div>
 
       {members.length === 0 ? (
         <p className={muted}>Nobody is in this match yet. Add players from the game day below.</p>
       ) : (
-        <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActive(null)}>
+        <DndContext id={`match-${match.id}`} sensors={sensors} collisionDetection={pointerWithin} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setActive(null)}>
           <div className="grid grid-cols-2 gap-3">
             {(["A", "B"] as const).map((t) => (
               <TeamColumn key={t} team={t} members={members.filter((m) => m.team === t)} onSwitch={switchTeam} onLeave={leave} busy={pending} />
@@ -286,7 +306,7 @@ export function MatchCard({
           Team A
           <input
             value={a}
-            onChange={(e) => { setA(e.target.value.replace(/\D/g, "").slice(0, 2)); setSaved(false); }}
+            onChange={(e) => { setA(clean(e.target.value)); setSaved(false); }}
             inputMode="numeric"
             placeholder="–"
             className={`${input} w-16 text-center text-2xl font-semibold`}
@@ -297,7 +317,7 @@ export function MatchCard({
           Team B
           <input
             value={b}
-            onChange={(e) => { setB(e.target.value.replace(/\D/g, "").slice(0, 2)); setSaved(false); }}
+            onChange={(e) => { setB(clean(e.target.value)); setSaved(false); }}
             inputMode="numeric"
             placeholder="–"
             className={`${input} w-16 text-center text-2xl font-semibold`}
@@ -314,7 +334,7 @@ export function MatchCard({
         </p>
       )}
       <div className="flex items-center justify-between">
-        <p className={muted}>Drag to swap or move. Left early? Use ⋯.</p>
+        <p className={muted}>Drag to swap or move. Use the icons to switch team or remove someone who left.</p>
         <ConfirmButton label="Delete match" confirmLabel="Delete?" className="text-sm text-red-600 underline" onConfirm={() => deleteMatch(match.id)} />
       </div>
     </section>

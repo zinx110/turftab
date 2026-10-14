@@ -98,9 +98,20 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
       .orderBy(asc(players.name)),
   ]);
 
+  // group once, so the work doesn't grow with games x matches x players
+  const group = <T,>(rows: T[], key: (r: T) => number) => {
+    const m = new Map<number, T[]>();
+    for (const r of rows) m.set(key(r), [...(m.get(key(r)) ?? []), r]);
+    return m;
+  };
+  const itemsBy = group(itemRows, (r) => r.gameId);
+  const playersBy = group(playerRows, (r) => r.gameId);
+  const matchesBy = group(matchRows, (r) => r.gameId);
+  const matchPlayersBy = group(matchPlayerRows, (r) => r.matchId);
+
   return gameRows.map((g) => {
-    const items = itemRows.filter((i) => i.gameId === g.id);
-    const ps = playerRows.filter((p) => p.gameId === g.id);
+    const items = itemsBy.get(g.id) ?? [];
+    const ps = playersBy.get(g.id) ?? [];
     const total = items.reduce((s, i) => s + i.amount, 0);
     const headcount = ps.filter((p) => !p.guest).length;
     const perHead = headcount ? perHeadCharge(total, headcount) : 0;
@@ -108,17 +119,18 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
       id: g.id,
       playedOn: g.playedOn,
       note: g.note,
-      matches: matchRows
-        .filter((m) => m.gameId === g.id)
-        .map((m) => ({
-          id: m.id,
-          number: m.number,
-          scoreA: m.scoreA,
-          scoreB: m.scoreB,
-          players: matchPlayerRows
-            .filter((p) => p.matchId === m.id)
-            .map(({ id, name, guest, team }) => ({ id, name, guest, team: team === "B" ? ("B" as const) : ("A" as const) })),
+      matches: (matchesBy.get(g.id) ?? []).map((m) => ({
+        id: m.id,
+        number: m.number,
+        scoreA: m.scoreA,
+        scoreB: m.scoreB,
+        players: (matchPlayersBy.get(m.id) ?? []).map(({ id, name, guest, team }) => ({
+          id,
+          name,
+          guest,
+          team: team === "B" ? ("B" as const) : ("A" as const),
         })),
+      })),
       items: items.map(({ id, label, amount }) => ({ id, label, amount })),
       players: ps.map(({ id, name, charge, guest, billedToId, billedToName }) => ({
         id, name, charge, guest, billedToId, billedToName,

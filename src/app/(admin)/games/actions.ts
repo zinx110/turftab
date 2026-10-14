@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { gameItems, gamePlayers, games, matchPlayers, matches } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
 import { getGame, getPlayersByIds, getShareState } from "@/lib/data";
+import { INVALID, validIds } from "@/lib/ids";
 import { assignTeams, freshDraw, type Team } from "@/lib/teams";
 import { computeCharges } from "@/lib/money";
 
@@ -145,7 +146,14 @@ async function persistGame(input: GameInput, opts: { joinMatchId?: number | null
     ]);
     const newcomers = keep.filter((pid) => !before.has(pid));
     const target = opts.joinMatchId === undefined ? await latestMatchId(id) : opts.joinMatchId;
-    if (target !== null && newcomers.length > 0) await joinMatch(target, id, newcomers);
+    if (target !== null && newcomers.length > 0) {
+      try {
+        await joinMatch(target, id, newcomers);
+      } catch {
+        // The game and shares are already saved. If the match vanished in the
+        // meantime, the newcomer can be added from the match's list.
+      }
+    }
   }
 
   revalidatePath("/", "layout");
@@ -164,6 +172,7 @@ export async function saveGame(input: GameInput) {
 // latest); they go to its smaller team.
 export async function addPlayerToGame(gameId: number, playerId: number, mode: "own" | "guest", matchId?: number | null) {
   await requireAdmin();
+  if (!validIds(gameId, playerId) || (typeof matchId === "number" && !validIds(matchId))) return INVALID;
   const game = await getGame(gameId);
   if (!game) return { error: "Game not found." };
   if (game.players.some((p) => p.id === playerId)) return { error: "They're already in this game." };
@@ -189,6 +198,7 @@ export async function addPlayerToGame(gameId: number, playerId: number, mode: "o
 
 export async function deleteGame(id: number) {
   await requireAdmin();
+  if (!validIds(id)) return INVALID;
   await db().delete(games).where(eq(games.id, id)); // items + attendance cascade
   revalidatePath("/", "layout");
   redirect("/games");
@@ -226,6 +236,11 @@ export async function moveShare(gameId: number, forId: number, toId: number | nu
 
 // ---- matches: teams, scores, who played ------------------------------------
 
+// First statement of a batch: holds a lock on this game until the batch
+// commits, so two simultaneous "add match" / "delete match" calls take turns
+// and each sees the other's numbering.
+const lockGame = (gameId: number) => db().execute(sql`select pg_advisory_xact_lock(${gameId})`);
+
 async function findMatch(matchId: number) {
   const [m] = await db().select().from(matches).where(eq(matches.id, matchId));
   return m ?? null;
@@ -235,6 +250,7 @@ async function findMatch(matchId: number) {
 // into fresh teams that differ from the previous match's split.
 export async function addMatch(gameId: number) {
   await requireAdmin();
+  if (!validIds(gameId)) return INVALID;
   const [game] = await db().select({ id: games.id }).from(games).where(eq(games.id, gameId));
   if (!game) return { error: "Game not found." };
   const attendees = (
@@ -244,10 +260,6 @@ export async function addMatch(gameId: number) {
 
   const last = await latestMatchId(gameId);
   const previous = last === null ? undefined : await teamsOfMatch(last);
-  const [{ n }] = await db()
-    .select({ n: sql<number>`coalesce(max(${matches.number}), 0)::int` })
-    .from(matches)
-    .where(eq(matches.gameId, gameId));
   const teams = freshDraw(attendees, previous);
 
   const next = await db().execute<{ id: number }>(
@@ -255,25 +267,36 @@ export async function addMatch(gameId: number) {
   );
   const matchId = next.rows[0].id;
   await db().batch([
-    db().insert(matches).values({ id: matchId, gameId, number: n + 1 }),
+    lockGame(gameId),
+    db().insert(matches).values({
+      id: matchId,
+      gameId,
+      number: sql`(select coalesce(max(${matches.number}), 0) + 1 from ${matches} where ${matches.gameId} = ${gameId})`,
+    }),
     db().insert(matchPlayers).values([...teams].map(([playerId, team]) => ({ matchId, gameId, playerId, team }))),
   ]);
   revalidatePath("/", "layout");
   return {};
 }
 
-// Matches carry no money, so deleting one is always safe. Later matches are
-// renumbered so the numbers stay 1, 2, 3…
+// Matches carry no money, so deleting one is always safe. The remaining
+// matches are renumbered 1, 2, 3… from scratch inside the same locked
+// transaction, so racing deletes and adds can't leave gaps or duplicates.
 export async function deleteMatch(matchId: number) {
   await requireAdmin();
+  if (!validIds(matchId)) return INVALID;
   const m = await findMatch(matchId);
   if (!m) return { error: "Match not found." };
   await db().batch([
+    lockGame(m.gameId),
     db().delete(matches).where(eq(matches.id, matchId)),
-    db()
-      .update(matches)
-      .set({ number: sql`${matches.number} - 1` })
-      .where(and(eq(matches.gameId, m.gameId), sql`${matches.number} > ${m.number}`)),
+    db().execute(sql`
+      update matches set number = ranked.n
+      from (
+        select id, row_number() over (order by number, id) as n
+        from matches where game_id = ${m.gameId}
+      ) ranked
+      where matches.id = ranked.id`),
   ]);
   revalidatePath("/", "layout");
   return {};
@@ -283,6 +306,7 @@ export async function deleteMatch(matchId: number) {
 // day, so what they owe doesn't change.
 export async function removeFromMatch(matchId: number, playerId: number) {
   await requireAdmin();
+  if (!validIds(matchId, playerId)) return INVALID;
   const removed = await db()
     .delete(matchPlayers)
     .where(and(eq(matchPlayers.matchId, matchId), eq(matchPlayers.playerId, playerId)))
@@ -295,6 +319,7 @@ export async function removeFromMatch(matchId: number, playerId: number) {
 // Put a game-day attendee into a match (they join the smaller team).
 export async function addToMatch(matchId: number, playerId: number) {
   await requireAdmin();
+  if (!validIds(matchId, playerId)) return INVALID;
   const m = await findMatch(matchId);
   if (!m) return { error: "Match not found." };
   const [attended] = await db()
@@ -311,8 +336,10 @@ export async function addToMatch(matchId: number, playerId: number) {
 // Re-draw this match's teams, different from how they are now when possible.
 export async function shuffleTeams(matchId: number) {
   await requireAdmin();
+  if (!validIds(matchId)) return INVALID;
+  if (!(await findMatch(matchId))) return { error: "Match not found." };
   const current = await teamsOfMatch(matchId);
-  if (current.size === 0) return { error: "Match not found." };
+  if (current.size === 0) return { error: "Nobody is in this match yet." };
   const teams = freshDraw([...current.keys()], current);
   // one statement, so a shuffle is all-or-nothing
   const cases = sql.join([...teams].map(([playerId, team]) => sql`when ${playerId} then ${team}`), sql` `);
@@ -326,6 +353,7 @@ export async function shuffleTeams(matchId: number) {
 
 export async function setTeam(matchId: number, playerId: number, team: "A" | "B") {
   await requireAdmin();
+  if (!validIds(matchId, playerId)) return INVALID;
   if (team !== "A" && team !== "B") return { error: "Invalid team." };
   const updated = await db()
     .update(matchPlayers)
@@ -340,6 +368,7 @@ export async function setTeam(matchId: number, playerId: number, team: "A" | "B"
 // Drag-and-drop: swap two players who are on opposite teams, atomically.
 export async function swapTeams(matchId: number, aId: number, bId: number) {
   await requireAdmin();
+  if (!validIds(matchId, aId, bId)) return INVALID;
   const rows = await db()
     .select({ playerId: matchPlayers.playerId, team: matchPlayers.team })
     .from(matchPlayers)
@@ -361,6 +390,7 @@ const score = z.number().int().min(0).max(99);
 // Pass null for both to clear the score.
 export async function saveScore(matchId: number, scoreA: number | null, scoreB: number | null) {
   await requireAdmin();
+  if (!validIds(matchId)) return INVALID;
   if ((scoreA === null) !== (scoreB === null)) return { error: "Enter both scores." };
   if (scoreA !== null && scoreB !== null && !(score.safeParse(scoreA).success && score.safeParse(scoreB).success)) {
     return { error: "Scores are whole numbers from 0 to 99." };
