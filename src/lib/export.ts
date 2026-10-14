@@ -6,7 +6,7 @@ import { requireAdmin } from "./auth";
 import { toCsv } from "./csv";
 import { getGames, getPlayersWithBalances } from "./data";
 
-export const EXPORTS = ["players", "games", "charges", "payments", "balances"] as const;
+export const EXPORTS = ["players", "games", "matches", "charges", "payments", "balances"] as const;
 export type ExportName = (typeof EXPORTS)[number];
 
 export function isExportName(s: string): s is ExportName {
@@ -39,6 +39,21 @@ export async function buildExport(name: ExportName) {
           g.surplus,
         ]),
       );
+    }
+    case "matches": {
+      const all = await getGames();
+      const rows = all.flatMap((g) =>
+        g.matches.map((m) => [
+          g.id,
+          g.playedOn,
+          m.number,
+          m.scoreA,
+          m.scoreB,
+          m.players.filter((p) => p.team === "A").map((p) => p.name).join("; "),
+          m.players.filter((p) => p.team === "B").map((p) => p.name).join("; "),
+        ]),
+      );
+      return toCsv(["game_id", "date", "match", "score_a", "score_b", "team_a", "team_b"], rows);
     }
     case "charges": {
       const billedTo = alias(players, "billed_to");

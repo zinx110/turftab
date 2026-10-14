@@ -34,13 +34,11 @@ export default async function GamesPage() {
                     <p className="font-semibold">{formatDate(g.playedOn)}</p>
                     {g.note && <p className={muted}>{g.note}</p>}
                   </div>
-                  {g.scoreA !== null && g.scoreB !== null ? (
-                    <span className="rounded-xl bg-subtle px-3 py-1 text-lg font-bold tabular-nums">
-                      <span className="text-emerald-700 dark:text-emerald-400">{g.scoreA}</span>
-                      <span className="px-1 text-foreground/40">:</span>
-                      <span className="text-sky-700 dark:text-sky-400">{g.scoreB}</span>
+                  {g.matches.length > 0 && (
+                    <span className={pill.blue}>
+                      {g.matches.length} {g.matches.length === 1 ? "match" : "matches"}
                     </span>
-                  ) : null}
+                  )}
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   <span className={pill.gray}>{formatTaka(g.total)}</span>
@@ -49,6 +47,14 @@ export default async function GamesPage() {
                   </span>
                   {guests > 0 && <span className={pill.amber}>{guests} guest{guests > 1 ? "s" : ""}</span>}
                 </div>
+                {g.matches.some((m) => m.scoreA !== null) && (
+                  <p className="mt-2 text-sm tabular-nums text-foreground/70">
+                    {g.matches
+                      .filter((m) => m.scoreA !== null)
+                      .map((m) => `${m.scoreA}:${m.scoreB}`)
+                      .join("  ·  ")}
+                  </p>
+                )}
               </Link>
             </li>
           );

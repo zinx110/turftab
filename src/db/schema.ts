@@ -4,6 +4,7 @@ import {
   boolean,
   check,
   date,
+  foreignKey,
   index,
   integer,
   pgTable,
@@ -11,6 +12,7 @@ import {
   serial,
   text,
   timestamp,
+  unique,
 } from "drizzle-orm/pg-core";
 
 // Money is stored as whole taka (integers). No decimals anywhere.
@@ -33,7 +35,7 @@ export const games = pgTable("games", {
   id: serial("id").primaryKey(),
   playedOn: date("played_on").notNull(),
   note: text("note"),
-  // Final score, optional: both set or both null.
+  // Legacy: scores now live on matches. Kept until the migration is verified.
   scoreA: integer("score_a"),
   scoreB: integer("score_b"),
   createdAt: timestamp("created_at", { withTimezone: true })
@@ -75,7 +77,7 @@ export const gamePlayers = pgTable(
     charge: integer("charge").notNull(),
     isGuest: boolean("is_guest").notNull().default(false),
     billedToId: integer("billed_to_id").references(() => players.id, { onDelete: "restrict" }),
-    // "A" or "B"; null for games recorded before teams existed.
+    // Legacy: teams now live on match_players. Kept until the migration is verified.
     team: text("team"),
   },
   (t) => [
@@ -128,4 +130,49 @@ export const loginAttempts = pgTable(
       .defaultNow(),
   },
   (t) => [index("login_attempts_at_idx").on(t.attemptedAt)],
+);
+
+// A game is a game day (one booking, one bill). It can hold several matches,
+// each with its own teams and score. Matches carry no money: billing only
+// looks at game_players, so leaving a match early never changes what is owed.
+export const matches = pgTable(
+  "matches",
+  {
+    id: serial("id").primaryKey(),
+    gameId: integer("game_id")
+      .notNull()
+      .references(() => games.id, { onDelete: "cascade" }),
+    number: integer("number").notNull(), // 1, 2, 3… within the game day
+    scoreA: integer("score_a"),
+    scoreB: integer("score_b"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    index("matches_game_idx").on(t.gameId),
+    unique("matches_id_game_unique").on(t.id, t.gameId),
+    check(
+      "matches_scores_valid",
+      sql`(${t.scoreA} is null) = (${t.scoreB} is null) and (${t.scoreA} is null or (${t.scoreA} between 0 and 99 and ${t.scoreB} between 0 and 99))`,
+    ),
+  ],
+);
+
+// Who played a match, and on which side. Both foreign keys below make the
+// database itself refuse a player who didn't attend that game day, and drop
+// someone from every match if they are taken off the game day.
+export const matchPlayers = pgTable(
+  "match_players",
+  {
+    matchId: integer("match_id").notNull(),
+    gameId: integer("game_id").notNull(),
+    playerId: integer("player_id").notNull(),
+    team: text("team").notNull(),
+  },
+  (t) => [
+    primaryKey({ columns: [t.matchId, t.playerId] }),
+    index("match_players_player_idx").on(t.playerId),
+    check("match_players_team_valid", sql`${t.team} in ('A', 'B')`),
+    foreignKey({ columns: [t.matchId, t.gameId], foreignColumns: [matches.id, matches.gameId] }).onDelete("cascade"),
+    foreignKey({ columns: [t.gameId, t.playerId], foreignColumns: [gamePlayers.gameId, gamePlayers.playerId] }).onDelete("cascade"),
+  ],
 );

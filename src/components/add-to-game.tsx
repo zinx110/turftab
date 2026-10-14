@@ -14,17 +14,20 @@ export function AddToGame({
   total,
   headcount,
   anyPaid,
+  matches,
 }: {
   gameId: number;
   candidates: { id: number; name: string }[];
   total: number;
   headcount: number;
   anyPaid: boolean;
+  matches: { id: number; number: number }[];
 }) {
   const [open, setOpen] = useState(false);
   const [choice, setChoice] = useState("");
   const [newName, setNewName] = useState("");
   const [guest, setGuest] = useState(false);
+  const [matchChoice, setMatchChoice] = useState<string | null>(null); // null = latest match
   const [error, setError] = useState<string>();
   const [pending, start] = useTransition();
 
@@ -41,12 +44,14 @@ export function AddToGame({
         if (made.error || !made.player) return setError(made.error);
         playerId = made.player.id;
       }
-      const r = await addPlayerToGame(gameId, playerId, guest ? "guest" : "own");
+      const joinId = matchChoice === null ? undefined : matchChoice === "none" ? null : Number(matchChoice);
+      const r = await addPlayerToGame(gameId, playerId, guest ? "guest" : "own", joinId);
       if (r.error) return setError(r.error);
       setOpen(false);
       setChoice("");
       setNewName("");
       setGuest(false);
+      setMatchChoice(null);
       setError(undefined);
     });
   }
@@ -89,6 +94,25 @@ export function AddToGame({
         Guest (plays free, others split the cost)
       </label>
 
+      {matches.length > 0 && (
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-foreground/70">Joins</span>
+          <select
+            value={matchChoice ?? String(matches[matches.length - 1].id)}
+            onChange={(e) => setMatchChoice(e.target.value)}
+            className={input}
+          >
+            {matches.map((m) => (
+              <option key={m.id} value={m.id}>
+                Match {m.number}
+                {m.id === matches[matches.length - 1].id ? " (latest)" : ""}
+              </option>
+            ))}
+            <option value="none">No match yet</option>
+          </select>
+        </label>
+      )}
+
       {ready && (
         <div className="rounded-xl bg-subtle p-3 text-sm">
           {guest ? (
@@ -120,7 +144,7 @@ export function AddToGame({
           {pending ? "Adding…" : "Add to game"}
         </button>
       </div>
-      <p className={muted}>They join the smaller team, and you can move them from there.</p>
+      <p className={muted}>In the match they join the smaller team, and you can move them from there.</p>
     </div>
   );
 }

@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { AddToGame } from "@/components/add-to-game";
 import { GameCollectRow } from "@/components/game-collect-row";
 import { MoveShare } from "@/components/move-share";
-import { TeamsPanel } from "@/components/teams-panel";
+import { AddMatchButton } from "@/components/add-match-button";
+import { MatchCard } from "@/components/match-card";
 import { btnGhost, card, muted, pill, sectionTitle } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import { getActivePlayers, getGameCollect } from "@/lib/data";
@@ -60,12 +61,20 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         </div>
       </section>
 
-      <TeamsPanel
-        gameId={game.id}
-        members={game.players.map((p) => ({ id: p.id, name: p.name, guest: p.guest, team: p.team }))}
-        scoreA={game.scoreA}
-        scoreB={game.scoreB}
-      />
+      <section className="flex flex-col gap-5">
+        <h2 className={sectionTitle}>Matches</h2>
+        {game.matches.length === 0 && (
+          <p className={muted}>No matches yet. Add the first one to draw teams.</p>
+        )}
+        {game.matches.map((m) => (
+          <MatchCard
+            key={m.id}
+            match={m}
+            bench={game.players.filter((p) => !m.players.some((x) => x.id === p.id)).map((p) => ({ id: p.id, name: p.name }))}
+          />
+        ))}
+        <AddMatchButton gameId={game.id} next={game.matches.length + 1} />
+      </section>
 
       <AddToGame
         gameId={game.id}
@@ -73,6 +82,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         total={game.total}
         headcount={game.headcount}
         anyPaid={payers.some((p) => p.paid > 0)}
+        matches={game.matches.map((m) => ({ id: m.id, number: m.number }))}
       />
 
       <section className="flex flex-col gap-2">

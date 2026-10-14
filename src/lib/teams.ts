@@ -44,3 +44,34 @@ export function outcomeFor(team: Team, scoreA: number, scoreB: number): Outcome 
   if (scoreA === scoreB) return "draw";
   return (team === "A") === scoreA > scoreB ? "win" : "loss";
 }
+
+// Two splits are "the same" if every player ends up with the same teammates,
+// whichever side is called A or B.
+export function samePartition(
+  a: ReadonlyMap<number, Team>,
+  b: ReadonlyMap<number, Team>,
+  ids: number[],
+) {
+  const common = ids.filter((id) => a.has(id) && b.has(id));
+  if (common.length === 0) return false;
+  return (
+    common.every((id) => a.get(id) === b.get(id)) ||
+    common.every((id) => a.get(id) !== b.get(id))
+  );
+}
+
+// A fresh random draw for the next match that is different from the last one
+// when that's possible (with two or three players there is only one way to
+// split, so it settles for whatever it gets).
+export function freshDraw(
+  playerIds: number[],
+  previous?: ReadonlyMap<number, Team>,
+  rand: () => number = Math.random,
+) {
+  let draw = assignTeams(playerIds, new Map(), rand);
+  if (!previous) return draw;
+  for (let i = 0; i < 50 && samePartition(draw, previous, playerIds); i++) {
+    draw = assignTeams(playerIds, new Map(), rand);
+  }
+  return draw;
+}

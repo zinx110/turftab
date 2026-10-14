@@ -20,10 +20,10 @@ Every week a group of us rents a turf. One person pays the ground, then collects
 | **Split** | `ceil(total ÷ paying players)`. Absent players are never charged. **Guests** are excluded from the headcount, so the others split the cost; they're still listed, tagged *guest*. A **covered** share still counts in the headcount but is billed to a sponsor (who needn't be playing). The rounding surplus is shown, never hidden. |
 | **Payments** | On each game's page the organiser sees who owes for that game, with a one-tap *Mark paid* (two taps, to prevent accidents) and a *Partial* amount box. The dashboard has a full-balance *Mark paid* too. Any payment can be undone. |
 | **Moving a share** | Days after a game, "B will cover mine" is one tap on the player's page or the game's page: *Move* an unpaid share to another player, or back to its owner. The original person then owes nothing for it. Once a share is paid or part-paid it is settled and can no longer move. A player's page, and the game's "Covered by others" list, show who is covering whom. |
-| **Teams & scores** | Everyone who played is split into **Team A / Team B** at random, kept within one player of each other (guests and covered players are on teams too). Editing a game keeps existing teams and puts newcomers on the smaller side. On the game page: *Shuffle*, **drag a player onto someone on the other team to swap them** (or onto the other team to move them; press-and-hold on a phone), and enter the final score. Each player's page shows their won/drawn/lost record, and the group page shows the teams and score. |
-| **Late players** | *Add a player* on a saved game (existing player or a new name, optionally as a guest). Shares are recalculated, with a preview of the new per-head amount and a warning if anyone already paid the old one; teams and the score are kept and the newcomer joins the smaller side. |
+| **Matches** | A game is a **game day** (one booking, one bill) that can hold several **matches**, each with its own teams and score. Every match is a fresh random draw of everyone who attended, always different from the previous split. On a match card: *Shuffle*, **drag a player onto someone on the other team to swap them** (or onto the other team to move them; press-and-hold on a phone), *Left early* to take someone out of that match, and the score. Matches carry no money, so leaving one never changes what a player owes. Each player's page shows their won/drawn/lost record across matches. |
+| **Late players** | *Add a player* on a saved game day (existing player or a new name, optionally as a guest), choosing which match they join. Shares are recalculated, with a preview of the new per-head amount and a warning if anyone already paid the old one; teams and scores are kept. |
 | **Dashboard** | Total outstanding, total collected, and who owes, biggest first, each with *Copy message* (a ready-to-paste reminder with the amount, bKash number and the player's link). |
-| **Sharing** | A group link (every game with the teams, score, each person's share and a *guest* tag — no balances, no payment status, no transfers) and a personal link per player (that player's balance only, including anyone they cover). Both rotate on demand. |
+| **Sharing** | A read-only group link, no login needed (every game day with each person's share and a *guest* tag, plus each match's teams and score — never balances, payment status or transfers) and a personal link per player (that player's balance only, including anyone they cover). Both rotate on demand. |
 | **Export** | Download players, games, charges, payments and balances as CSV, so the records don't depend on one database. |
 | **PWA** | Installable to the home screen, opens full-screen, and shows a friendly offline page when there's no signal. |
 
@@ -48,6 +48,8 @@ Neon Postgres (serverless, pooled, HTTP driver)  via Drizzle ORM
 
 ```mermaid
 erDiagram
+    games   ||--o{ matches      : "has matches"
+    matches ||--o{ match_players : "who played"
     players ||--o{ game_players : "played in"
     games   ||--o{ game_players : "has attendees"
     games   ||--o{ game_items   : "has costs"
@@ -64,8 +66,6 @@ erDiagram
         int id PK
         date played_on
         text note
-        int score_a
-        int score_b
     }
     game_items {
         int id PK
@@ -79,6 +79,18 @@ erDiagram
         int charge
         bool is_guest
         int billed_to_id FK
+    }
+    matches {
+        int id PK
+        int game_id FK
+        int number
+        int score_a
+        int score_b
+    }
+    match_players {
+        int match_id PK, FK
+        int game_id FK
+        int player_id PK, FK
         text team
     }
     payments {
@@ -105,6 +117,7 @@ The key idea is that **balances are never stored**. A player's balance is always
 - `game_players.charge` is each attendee's share, fixed at save time, so history doesn't shift if the formula ever changes. Editing a game regenerates its charges.
 - `game_players.billed_to_id` transfers a share to another player (null = they pay it themselves), and `is_guest` marks a free player excluded from the headcount. A player's balance sums the charges **billed to** them, which is how a sponsor ends up owing for people who never owe anything themselves. CHECK constraints stop a guest being charged or billed, and a player covering themselves.
 - A payment reduces the running balance, so "paid two games at once" and "paid half" need no special cases. `payments.game_id` is optional: *Mark paid* on a game's page records the payment against that game.
+- A game day holds **matches**; teams and scores live on `matches` / `match_players`. Two composite foreign keys make the database itself refuse a match player who didn't attend that game day, and drop someone from every match if they are taken off the game day. Billing only reads `game_players`, never matches.
 - Players with history can't be deleted (`ON DELETE RESTRICT`); they are archived.
 - CHECK constraints keep amounts positive at the database level too.
 
@@ -242,7 +255,7 @@ It's a personal tool, so I treated "market value" as irrelevant and optimised fo
 
 ## How I tested it
 
-- **Unit tests (49)** on the pure logic where mistakes cost money or trust: the split and rounding (including the no-undercharge property, also with guests), team assignment (always balanced, existing teams kept, newcomers join the smaller side), guest and transfer billing (the worked example, invalid combinations), payment allocation (partial, over-payment, game-tied payments, several charge lines per game), session signing (tampered, wrong-secret and expired tokens), and CSV encoding (quoting, formula injection, non-Latin names).
+- **Unit tests (53)** on the pure logic where mistakes cost money or trust: the split and rounding (including the no-undercharge property, also with guests), team assignment (always balanced, existing teams kept, newcomers join the smaller side, a new match never repeats the previous split), guest and transfer billing (the worked example, invalid combinations), payment allocation (partial, over-payment, game-tied payments, several charge lines per game), session signing (tampered, wrong-secret and expired tokens), and CSV encoding (quoting, formula injection, non-Latin names).
 - **Live checks against a real Neon database during development**, covering the full flow: multi-item games, absent players, bad input, one-tap and partial payments, undo, game edits regenerating charges, and both share pages including token rotation. The group-page payload was asserted not to contain balance or payment data.
 - **Black-box probes of the production build** for auth boundaries (logged-out, forged and wrong-secret cookies all get a 307), the PWA files and headers, and the CSV downloads.
 

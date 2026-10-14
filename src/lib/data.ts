@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 import { and, asc, desc, eq, gt, inArray, isNotNull, sql } from "drizzle-orm";
 import { alias } from "drizzle-orm/pg-core";
 import { db } from "@/db";
-import { gameItems, gamePlayers, games, payments, players, settings } from "@/db/schema";
+import { gameItems, gamePlayers, games, matchPlayers, matches, payments, players, settings } from "@/db/schema";
 import { requireAdmin } from "./auth";
 import { allocatePayments, allocateToLines } from "./ledger";
 import { perHeadCharge } from "./money";
@@ -36,15 +36,21 @@ export type GamePlayer = {
   guest: boolean;
   billedToId: number | null;
   billedToName: string | null;
-  team: "A" | "B" | null;
+};
+
+export type MatchView = {
+  id: number;
+  number: number;
+  scoreA: number | null;
+  scoreB: number | null;
+  players: { id: number; name: string; guest: boolean; team: "A" | "B" }[];
 };
 
 export type GameView = {
   id: number;
   playedOn: string;
   note: string | null;
-  scoreA: number | null;
-  scoreB: number | null;
+  matches: MatchView[];
   items: { id: number; label: string; amount: number }[];
   players: GamePlayer[];
   total: number;
@@ -65,7 +71,7 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
 
   const billedTo = alias(players, "billed_to");
   const ids = gameRows.map((g) => g.id);
-  const [itemRows, playerRows] = await Promise.all([
+  const [itemRows, playerRows, matchRows, matchPlayerRows] = await Promise.all([
     db().select().from(gameItems).where(inArray(gameItems.gameId, ids)).orderBy(asc(gameItems.id)),
     db()
       .select({
@@ -76,12 +82,19 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
         guest: gamePlayers.isGuest,
         billedToId: gamePlayers.billedToId,
         billedToName: billedTo.name,
-        team: gamePlayers.team,
       })
       .from(gamePlayers)
       .innerJoin(players, eq(players.id, gamePlayers.playerId))
       .leftJoin(billedTo, eq(billedTo.id, gamePlayers.billedToId))
       .where(inArray(gamePlayers.gameId, ids))
+      .orderBy(asc(players.name)),
+    db().select().from(matches).where(inArray(matches.gameId, ids)).orderBy(asc(matches.number), asc(matches.id)),
+    db()
+      .select({ matchId: matchPlayers.matchId, id: players.id, name: players.name, guest: gamePlayers.isGuest, team: matchPlayers.team })
+      .from(matchPlayers)
+      .innerJoin(players, eq(players.id, matchPlayers.playerId))
+      .innerJoin(gamePlayers, and(eq(gamePlayers.gameId, matchPlayers.gameId), eq(gamePlayers.playerId, matchPlayers.playerId)))
+      .where(inArray(matchPlayers.gameId, ids))
       .orderBy(asc(players.name)),
   ]);
 
@@ -95,11 +108,20 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
       id: g.id,
       playedOn: g.playedOn,
       note: g.note,
-      scoreA: g.scoreA,
-      scoreB: g.scoreB,
+      matches: matchRows
+        .filter((m) => m.gameId === g.id)
+        .map((m) => ({
+          id: m.id,
+          number: m.number,
+          scoreA: m.scoreA,
+          scoreB: m.scoreB,
+          players: matchPlayerRows
+            .filter((p) => p.matchId === m.id)
+            .map(({ id, name, guest, team }) => ({ id, name, guest, team: team === "B" ? ("B" as const) : ("A" as const) })),
+        })),
       items: items.map(({ id, label, amount }) => ({ id, label, amount })),
-      players: ps.map(({ id, name, charge, guest, billedToId, billedToName, team }) => ({
-        id, name, charge, guest, billedToId, billedToName, team: team === "A" || team === "B" ? team : null,
+      players: ps.map(({ id, name, charge, guest, billedToId, billedToName }) => ({
+        id, name, charge, guest, billedToId, billedToName,
       })),
       total,
       headcount,
@@ -196,13 +218,13 @@ export async function getPlayersWithBalances() {
   });
 }
 
-// Win/draw/loss over games with a team and a score.
+// Won/drawn/lost over every scored match the player was in.
 async function loadRecord(playerId: number) {
   const rows = await db()
-    .select({ team: gamePlayers.team, scoreA: games.scoreA, scoreB: games.scoreB })
-    .from(gamePlayers)
-    .innerJoin(games, eq(games.id, gamePlayers.gameId))
-    .where(and(eq(gamePlayers.playerId, playerId), isNotNull(gamePlayers.team), isNotNull(games.scoreA)));
+    .select({ team: matchPlayers.team, scoreA: matches.scoreA, scoreB: matches.scoreB })
+    .from(matchPlayers)
+    .innerJoin(matches, eq(matches.id, matchPlayers.matchId))
+    .where(and(eq(matchPlayers.playerId, playerId), isNotNull(matches.scoreA)));
   const rec = { played: rows.length, win: 0, draw: 0, loss: 0 };
   for (const r of rows) {
     if ((r.team !== "A" && r.team !== "B") || r.scoreA === null || r.scoreB === null) continue;
@@ -386,8 +408,9 @@ export async function getGroupToken() {
   return (await readSetting("group_token")) ?? token;
 }
 
-// Everyone who played, their share, and a guest tag. It deliberately omits
-// balances, payments and who a share was transferred to.
+// Read-only view for the group link. It shows the game day (costs, everyone's
+// share, guest tags) and each match's teams and score. It deliberately omits
+// balances, payments, who has paid, and who a share was transferred to.
 export async function getGroupShare(token: string) {
   const stored = await readSetting("group_token");
   if (!stored || !safeEqual(token, stored)) return null;
@@ -398,13 +421,20 @@ export async function getGroupShare(token: string) {
       id: g.id,
       playedOn: g.playedOn,
       note: g.note,
-      scoreA: g.scoreA,
-      scoreB: g.scoreB,
       items: g.items.map(({ label, amount }) => ({ label, amount })),
       total: g.total,
       headcount: g.headcount,
       perHead: g.perHead,
-      people: g.players.map((p) => ({ name: p.name, guest: p.guest, team: p.team, amount: p.guest ? null : p.charge })),
+      people: g.players.map((p) => ({ name: p.name, guest: p.guest, amount: p.guest ? null : p.charge })),
+      matches: g.matches.map((m) => ({
+        number: m.number,
+        scoreA: m.scoreA,
+        scoreB: m.scoreB,
+        teams: {
+          A: m.players.filter((p) => p.team === "A").map((p) => ({ name: p.name, guest: p.guest })),
+          B: m.players.filter((p) => p.team === "B").map((p) => ({ name: p.name, guest: p.guest })),
+        },
+      })),
     })),
   };
 }
