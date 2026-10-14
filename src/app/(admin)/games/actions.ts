@@ -8,6 +8,7 @@ import { db } from "@/db";
 import { gameItems, gamePlayers, games } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
 import { getPlayersByIds, getShareState } from "@/lib/data";
+import { assignTeams, type Team } from "@/lib/teams";
 import { computeCharges } from "@/lib/money";
 
 const attendee = z.object({
@@ -54,6 +55,18 @@ export async function saveGame(input: GameInput) {
     return { error: "Some selected players no longer exist." };
   }
 
+  // Existing players keep their team when a game is edited; newcomers are
+  // placed on the smaller side; a brand-new game gets a fair random split.
+  const existingTeams = new Map<number, Team>();
+  if (id !== undefined) {
+    const rows = await db()
+      .select({ playerId: gamePlayers.playerId, team: gamePlayers.team })
+      .from(gamePlayers)
+      .where(eq(gamePlayers.gameId, id));
+    for (const r of rows) if (r.team === "A" || r.team === "B") existingTeams.set(r.playerId, r.team);
+  }
+  const teams = assignTeams(attendees.map((a) => a.playerId), existingTeams);
+
   const itemRows = (gameId: number) => items.map((i) => ({ gameId, ...i }));
   const playerRows = (gameId: number) =>
     split.lines.map((l) => ({
@@ -62,6 +75,7 @@ export async function saveGame(input: GameInput) {
       charge: l.charge,
       isGuest: l.guest,
       billedToId: l.billedToId,
+      team: teams.get(l.playerId) ?? null,
     }));
 
   if (id === undefined) {
@@ -126,6 +140,61 @@ export async function moveShare(gameId: number, forId: number, toId: number | nu
     .update(gamePlayers)
     .set({ billedToId: target })
     .where(and(eq(gamePlayers.gameId, gameId), eq(gamePlayers.playerId, forId)));
+  revalidatePath("/", "layout");
+  return {};
+}
+
+// ---- teams and score --------------------------------------------------------
+
+export async function shuffleTeams(gameId: number) {
+  await requireAdmin();
+  const rows = await db()
+    .select({ playerId: gamePlayers.playerId })
+    .from(gamePlayers)
+    .where(eq(gamePlayers.gameId, gameId));
+  if (rows.length === 0) return { error: "Game not found." };
+  const teams = assignTeams(rows.map((r) => r.playerId));
+  // one statement, so a shuffle is all-or-nothing
+  const cases = sql.join(
+    [...teams].map(([playerId, team]) => sql`when ${playerId} then ${team}`),
+    sql` `,
+  );
+  await db()
+    .update(gamePlayers)
+    .set({ team: sql`case ${gamePlayers.playerId} ${cases} end` })
+    .where(eq(gamePlayers.gameId, gameId));
+  revalidatePath("/", "layout");
+  return {};
+}
+
+export async function setTeam(gameId: number, playerId: number, team: "A" | "B") {
+  await requireAdmin();
+  if (team !== "A" && team !== "B") return { error: "Invalid team." };
+  const updated = await db()
+    .update(gamePlayers)
+    .set({ team })
+    .where(and(eq(gamePlayers.gameId, gameId), eq(gamePlayers.playerId, playerId)))
+    .returning({ playerId: gamePlayers.playerId });
+  if (updated.length === 0) return { error: "That player wasn't in this game." };
+  revalidatePath("/", "layout");
+  return {};
+}
+
+const score = z.number().int().min(0).max(99);
+
+// Pass null for both to clear the score.
+export async function saveScore(gameId: number, scoreA: number | null, scoreB: number | null) {
+  await requireAdmin();
+  if ((scoreA === null) !== (scoreB === null)) return { error: "Enter both scores." };
+  if (scoreA !== null && scoreB !== null && !(score.safeParse(scoreA).success && score.safeParse(scoreB).success)) {
+    return { error: "Scores are whole numbers from 0 to 99." };
+  }
+  const updated = await db()
+    .update(games)
+    .set({ scoreA, scoreB })
+    .where(eq(games.id, gameId))
+    .returning({ id: games.id });
+  if (updated.length === 0) return { error: "Game not found." };
   revalidatePath("/", "layout");
   return {};
 }

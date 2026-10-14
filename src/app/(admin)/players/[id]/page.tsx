@@ -9,7 +9,8 @@ import {
   PlayerProfileForm,
   RegenerateLinkButton,
 } from "@/components/player-controls";
-import { card, muted } from "@/components/ui";
+import { Avatar } from "@/components/avatar";
+import { card, muted, pill, sectionTitle } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import { formatDate } from "@/lib/dates";
 import { getActivePlayers, getPlayerDetail } from "@/lib/data";
@@ -21,7 +22,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
   if (!Number.isInteger(id)) notFound();
   const [detail, activePlayers] = await Promise.all([getPlayerDetail(id), getActivePlayers()]);
   if (!detail) notFound();
-  const { player, perGame, payments, balance, charged, paid, coveredAway, guestsByGame } = detail;
+  const { player, perGame, payments, balance, charged, paid, coveredAway, guestsByGame, record } = detail;
 
   // One card per game: what this player owes (if anything) and any share of
   // theirs that someone else is covering.
@@ -45,31 +46,60 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
 
   return (
     <div className="flex flex-col gap-6">
-      <header>
+      <header className="flex flex-col gap-3">
         <Link href="/players" className={muted}>
           ← Players
         </Link>
-        <h1 className="text-2xl font-semibold">{player.name}</h1>
-        {!player.active && <p className={muted}>Archived</p>}
+        <div className="flex items-center gap-3">
+          <Avatar name={player.name} size="lg" />
+          <div>
+            <h1 className="text-2xl font-bold">{player.name}</h1>
+            {!player.active && <span className={pill.gray}>Archived</span>}
+          </div>
+        </div>
       </header>
 
-      <section className={card}>
-        <p className={muted}>{balance > 0 ? "Owes" : balance < 0 ? "Credit" : "Balance"}</p>
-        <p className={`text-3xl font-semibold ${balance > 0 ? "text-red-600" : ""}`}>
-          {balance === 0 ? "Settled" : formatTaka(Math.abs(balance))}
-        </p>
-        <p className={muted}>
-          {formatTaka(charged)} charged · {formatTaka(paid)} paid
+      <section className={`${card} flex items-end justify-between gap-3`}>
+        <div>
+          <p className={muted}>{balance > 0 ? "Owes" : balance < 0 ? "Credit" : "Balance"}</p>
+          <p className={`text-3xl font-bold ${balance > 0 ? "text-red-600 dark:text-red-400" : balance < 0 ? "text-sky-600" : "text-emerald-600"}`}>
+            {balance === 0 ? "Settled" : formatTaka(Math.abs(balance))}
+          </p>
+        </div>
+        <p className="text-right text-sm text-foreground/60">
+          {formatTaka(charged)} charged
+          <br />
+          {formatTaka(paid)} paid
         </p>
       </section>
 
+      {record.played > 0 && (
+        <section className={`${card} flex flex-col gap-3`}>
+          <p className={sectionTitle}>Match record · {record.played} played</p>
+          <div className="grid grid-cols-3 gap-2 text-center">
+            <div className="rounded-xl bg-emerald-600/10 py-2">
+              <p className="text-2xl font-bold text-emerald-700 dark:text-emerald-400">{record.win}</p>
+              <p className="text-xs font-medium text-foreground/60">Won</p>
+            </div>
+            <div className="rounded-xl bg-subtle py-2">
+              <p className="text-2xl font-bold">{record.draw}</p>
+              <p className="text-xs font-medium text-foreground/60">Drawn</p>
+            </div>
+            <div className="rounded-xl bg-red-600/10 py-2">
+              <p className="text-2xl font-bold text-red-600 dark:text-red-400">{record.loss}</p>
+              <p className="text-xs font-medium text-foreground/60">Lost</p>
+            </div>
+          </div>
+        </section>
+      )}
+
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Record payment</h2>
+        <h2 className={sectionTitle}>Record payment</h2>
         <PayForm playerId={player.id} balance={balance} />
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Games</h2>
+        <h2 className={sectionTitle}>Games</h2>
         {ordered.length === 0 && <p className={muted}>No games yet.</p>}
         <ul className="flex flex-col gap-2">
           {ordered.map(({ gameId, playedOn, payer, away }) => (
@@ -80,13 +110,13 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
                 </Link>
                 {payer ? (
                   <span className="text-right">
-                    <span className="block font-medium">{formatTaka(payer.charge)}</span>
-                    <span className={payer.due === 0 ? "text-sm text-emerald-600" : "text-sm text-red-600"}>
+                    <span className="block font-bold">{formatTaka(payer.charge)}</span>
+                    <span className={payer.due === 0 ? pill.green : payer.paid > 0 ? pill.amber : pill.red}>
                       {payer.due === 0 ? "paid" : payer.paid > 0 ? `${formatTaka(payer.due)} left` : "unpaid"}
                     </span>
                   </span>
                 ) : (
-                  <span className={muted}>nothing to pay</span>
+                  <span className={pill.gray}>nothing to pay</span>
                 )}
               </div>
 
@@ -137,7 +167,7 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Payments</h2>
+        <h2 className={sectionTitle}>Payments</h2>
         {payments.length === 0 && <p className={muted}>None yet.</p>}
         <ul className="flex flex-col gap-2">
           {payments.map((p) => (
@@ -160,12 +190,12 @@ export default async function PlayerPage({ params }: { params: Promise<{ id: str
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Details</h2>
+        <h2 className={sectionTitle}>Details</h2>
         <PlayerProfileForm id={player.id} name={player.name} phone={player.phone ?? ""} />
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Personal link</h2>
+        <h2 className={sectionTitle}>Personal link</h2>
         <p className={muted}>Shows only this player&apos;s balance. Regenerate if it leaks.</p>
         <div className="flex flex-wrap gap-2">
           <CopyButton text={`{origin}/p/${player.token}`} label="Copy link" />

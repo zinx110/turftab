@@ -1,7 +1,8 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { BkashCard, money, ShareShell } from "@/components/share-chrome";
-import { card, muted } from "@/components/ui";
+import { Avatar } from "@/components/avatar";
+import { card, muted, pill } from "@/components/ui";
 import { formatDate } from "@/lib/dates";
 import { getGroupShare } from "@/lib/data";
 
@@ -37,20 +38,43 @@ export default async function GroupSharePage({ params }: { params: Promise<{ tok
             <p className="mt-2 text-sm font-medium">
               {g.headcount} paying × {money(g.perHead)} each
             </p>
-            <ul className="mt-1 text-sm">
-              {g.people.map((person, idx) => (
-                <li key={idx} className="flex items-center justify-between py-0.5">
-                  <span>{person.name}</span>
-                  {person.guest ? (
-                    <span className="rounded-full border border-black/15 px-2 py-0.5 text-xs dark:border-white/20">
-                      guest
-                    </span>
-                  ) : (
-                    <span>{money(person.amount ?? 0)}</span>
-                  )}
-                </li>
-              ))}
-            </ul>
+            {g.scoreA !== null && g.scoreB !== null && (
+              <p className="mt-3 rounded-xl bg-subtle py-2 text-center text-2xl font-bold tabular-nums">
+                <span className="text-emerald-700 dark:text-emerald-400">{g.scoreA}</span>
+                <span className="px-2 text-foreground/40">:</span>
+                <span className="text-sky-700 dark:text-sky-400">{g.scoreB}</span>
+              </p>
+            )}
+            {g.people.some((p) => p.team) ? (
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                {(["A", "B"] as const).map((t) => (
+                  <div key={t}>
+                    <p className={`mb-1 text-xs font-bold uppercase tracking-wider ${t === "A" ? "text-emerald-700 dark:text-emerald-400" : "text-sky-700 dark:text-sky-400"}`}>
+                      Team {t}
+                    </p>
+                    <ul className="flex flex-col gap-1 text-sm">
+                      {g.people.filter((p) => p.team === t).map((person, idx) => (
+                        <li key={idx} className="flex items-center gap-2">
+                          <Avatar name={person.name} size="sm" />
+                          <span className="min-w-0 flex-1 truncate">{person.name}</span>
+                          {person.guest ? <span className={pill.gray}>guest</span> : <span className="text-foreground/60">{money(person.amount ?? 0)}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ul className="mt-3 flex flex-col gap-1 text-sm">
+                {g.people.map((person, idx) => (
+                  <li key={idx} className="flex items-center gap-2">
+                    <Avatar name={person.name} size="sm" />
+                    <span className="min-w-0 flex-1 truncate">{person.name}</span>
+                    {person.guest ? <span className={pill.gray}>guest</span> : <span className="text-foreground/60">{money(person.amount ?? 0)}</span>}
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
       </ul>

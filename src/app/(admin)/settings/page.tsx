@@ -1,6 +1,6 @@
 import { BkashForm, RegenerateLinkButton } from "@/components/player-controls";
 import { CopyButton } from "@/components/copy-button";
-import { btnGhost, muted } from "@/components/ui";
+import { btnGhost, muted, sectionTitle } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import { getGroupToken, readSetting } from "@/lib/data";
 import { EXPORTS } from "@/lib/export";
@@ -12,16 +12,16 @@ export default async function SettingsPage() {
 
   return (
     <div className="flex flex-col gap-8">
-      <h1 className="text-2xl font-semibold">Settings</h1>
+      <h1 className="text-2xl font-bold">Settings</h1>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">bKash number</h2>
+        <h2 className={sectionTitle}>bKash number</h2>
         <p className={muted}>Shown on the group and personal pages.</p>
         <BkashForm initial={bkash ?? ""} />
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Group link</h2>
+        <h2 className={sectionTitle}>Group link</h2>
         <p className={muted}>Lists games, costs and who played. Never shows who owes or has paid.</p>
         <div className="flex flex-wrap gap-2">
           <CopyButton text={`{origin}/s/${groupToken}`} label="Copy link" />
@@ -30,7 +30,7 @@ export default async function SettingsPage() {
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Export data</h2>
+        <h2 className={sectionTitle}>Export data</h2>
         <p className={muted}>
           Download a copy as CSV, so your records don&apos;t depend on the database alone.
         </p>

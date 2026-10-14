@@ -2,7 +2,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { GameCollectRow } from "@/components/game-collect-row";
 import { MoveShare } from "@/components/move-share";
-import { btnGhost, card, muted } from "@/components/ui";
+import { TeamsPanel } from "@/components/teams-panel";
+import { btnGhost, card, muted, pill, sectionTitle } from "@/components/ui";
 import { requireAdmin } from "@/lib/auth";
 import { getActivePlayers, getGameCollect } from "@/lib/data";
 import { formatDate } from "@/lib/dates";
@@ -27,7 +28,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
           ← Games
         </Link>
         <div className="flex items-start justify-between gap-3">
-          <h1 className="text-2xl font-semibold">{formatDate(game.playedOn)}</h1>
+          <h1 className="text-2xl font-bold">{formatDate(game.playedOn)}</h1>
           <Link href={`/games/${game.id}/edit`} className={btnGhost}>
             Edit
           </Link>
@@ -35,28 +36,37 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         {game.note && <p className={muted}>{game.note}</p>}
       </header>
 
-      <section className={card}>
-        <ul className="text-sm">
+      <section className={`${card} flex flex-col gap-3`}>
+        <ul className="flex flex-col gap-1.5 text-sm">
           {game.items.map((i) => (
             <li key={i.id} className="flex justify-between">
-              <span>{i.label}</span>
-              <span>{formatTaka(i.amount)}</span>
+              <span className="text-foreground/70">{i.label}</span>
+              <span className="font-medium">{formatTaka(i.amount)}</span>
             </li>
           ))}
         </ul>
-        <p className="mt-2 flex justify-between font-semibold">
-          <span>Total</span>
-          <span>{formatTaka(game.total)}</span>
-        </p>
-        <p className={`${muted} mt-1`}>
-          {game.headcount} paying × {formatTaka(game.perHead)}
-          {game.surplus > 0 && ` (${formatTaka(game.surplus)} over)`}
-        </p>
+        <div className="flex items-center justify-between border-t border-line pt-3">
+          <span className="font-semibold">Total</span>
+          <span className="text-xl font-bold">{formatTaka(game.total)}</span>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className={pill.green}>
+            {game.headcount} paying × {formatTaka(game.perHead)}
+          </span>
+          {game.surplus > 0 && <span className={pill.gray}>{formatTaka(game.surplus)} over</span>}
+        </div>
       </section>
+
+      <TeamsPanel
+        gameId={game.id}
+        members={game.players.map((p) => ({ id: p.id, name: p.name, guest: p.guest, team: p.team }))}
+        scoreA={game.scoreA}
+        scoreB={game.scoreB}
+      />
 
       <section className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
-          <h2 className="font-medium">Collect</h2>
+          <h2 className={sectionTitle}>Collect</h2>
           <p className={muted}>
             {formatTaka(collected)} of {formatTaka(billed)} collected
           </p>
@@ -73,7 +83,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
 
       {covered.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h2 className="font-medium">Covered by others</h2>
+          <h2 className={sectionTitle}>Covered by others</h2>
           <ul className="flex flex-col gap-2">
             {covered.map((c) => (
               <li key={c.id} className={`${card} flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm`}>
@@ -100,7 +110,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
 
       {guests.length > 0 && (
         <section className="flex flex-col gap-1">
-          <h2 className="font-medium">Guests (free)</h2>
+          <h2 className={sectionTitle}>Guests (free)</h2>
           <p className={muted}>{guests.map((g) => g.name).join(", ")}</p>
         </section>
       )}

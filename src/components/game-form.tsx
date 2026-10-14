@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 import { createPlayer } from "@/app/(admin)/players/actions";
 import { deleteGame, saveGame } from "@/app/(admin)/games/actions";
 import { computeCharges, formatTaka } from "@/lib/money";
-import { btn, btnDanger, btnGhost, card, input, muted } from "./ui";
+import { btn, btnDanger, btnGhost, card, input, muted, sectionTitle } from "./ui";
 
 type Player = { id: number; name: string };
 type Pick = { guest: boolean; billedToId: number | null };
@@ -105,7 +105,7 @@ export function GameForm({ players: initialPlayers, initial }: { players: Player
   return (
     <form onSubmit={submit} className="flex flex-col gap-6">
       <section className="flex flex-col gap-2">
-        <label className="font-medium" htmlFor="playedOn">
+        <label className={sectionTitle} htmlFor="playedOn">
           Date
         </label>
         <input id="playedOn" type="date" required value={playedOn} onChange={(e) => setPlayedOn(e.target.value)} className={input} />
@@ -113,7 +113,7 @@ export function GameForm({ players: initialPlayers, initial }: { players: Player
       </section>
 
       <section className="flex flex-col gap-2">
-        <h2 className="font-medium">Costs</h2>
+        <h2 className={sectionTitle}>Costs</h2>
         {items.map((item, i) => (
           <div key={i} className="flex gap-2">
             <input
@@ -146,7 +146,7 @@ export function GameForm({ players: initialPlayers, initial }: { players: Player
 
       <section className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <h2 className="font-medium">Who played ({selectedIds.length})</h2>
+          <h2 className={sectionTitle}>Who played ({selectedIds.length})</h2>
           <button
             type="button"
             className="text-sm underline"
@@ -165,7 +165,7 @@ export function GameForm({ players: initialPlayers, initial }: { players: Player
               onClick={() => toggle(p.id)}
               aria-pressed={p.id in picks}
               className={`rounded-full border px-3 py-1.5 text-sm ${
-                p.id in picks ? "border-emerald-600 bg-emerald-600 text-white" : "border-black/15 dark:border-white/20"
+                p.id in picks ? "border-emerald-600 bg-emerald-600 text-white shadow-sm" : "border-line bg-surface hover:bg-subtle"
               }`}
             >
               {p.name}
@@ -182,7 +182,7 @@ export function GameForm({ players: initialPlayers, initial }: { players: Player
 
       {selectedIds.length > 0 && (
         <section className="flex flex-col gap-2">
-          <h2 className="font-medium">Who pays for whom</h2>
+          <h2 className={sectionTitle}>Who pays for whom</h2>
           <p className={muted}>
             Normally everyone pays their own share. <b>Guest</b> plays free and the others split the cost.{" "}
             <b>Covered by</b> bills their share to another player, who doesn&apos;t have to be playing.
@@ -215,7 +215,7 @@ export function GameForm({ players: initialPlayers, initial }: { players: Player
         </section>
       )}
 
-      <section className={`${card} sticky bottom-20 bg-background`}>
+      <section className={`${card} sticky bottom-20 shadow-lg`}>
         {split ? (
           <>
             <p className="text-lg font-semibold">

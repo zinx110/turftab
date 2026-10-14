@@ -15,6 +15,13 @@
       "when": 1791180970320,
       "tag": "0001_solid_wolfsbane",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1791962842115,
+      "tag": "0002_even_gauntlet",
+      "breakpoints": true
     }
   ]
 }

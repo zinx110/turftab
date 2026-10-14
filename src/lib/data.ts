@@ -7,6 +7,7 @@ import { requireAdmin } from "./auth";
 import { allocatePayments, allocateToLines } from "./ledger";
 import { perHeadCharge } from "./money";
 import { safeEqual } from "./session";
+import { outcomeFor } from "./teams";
 
 // ---- settings -------------------------------------------------------------
 
@@ -35,12 +36,15 @@ export type GamePlayer = {
   guest: boolean;
   billedToId: number | null;
   billedToName: string | null;
+  team: "A" | "B" | null;
 };
 
 export type GameView = {
   id: number;
   playedOn: string;
   note: string | null;
+  scoreA: number | null;
+  scoreB: number | null;
   items: { id: number; label: string; amount: number }[];
   players: GamePlayer[];
   total: number;
@@ -72,6 +76,7 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
         guest: gamePlayers.isGuest,
         billedToId: gamePlayers.billedToId,
         billedToName: billedTo.name,
+        team: gamePlayers.team,
       })
       .from(gamePlayers)
       .innerJoin(players, eq(players.id, gamePlayers.playerId))
@@ -90,9 +95,11 @@ async function loadGames(onlyId?: number): Promise<GameView[]> {
       id: g.id,
       playedOn: g.playedOn,
       note: g.note,
+      scoreA: g.scoreA,
+      scoreB: g.scoreB,
       items: items.map(({ id, label, amount }) => ({ id, label, amount })),
-      players: ps.map(({ id, name, charge, guest, billedToId, billedToName }) => ({
-        id, name, charge, guest, billedToId, billedToName,
+      players: ps.map(({ id, name, charge, guest, billedToId, billedToName, team }) => ({
+        id, name, charge, guest, billedToId, billedToName, team: team === "A" || team === "B" ? team : null,
       })),
       total,
       headcount,
@@ -189,6 +196,21 @@ export async function getPlayersWithBalances() {
   });
 }
 
+// Win/draw/loss over games with a team and a score.
+async function loadRecord(playerId: number) {
+  const rows = await db()
+    .select({ team: gamePlayers.team, scoreA: games.scoreA, scoreB: games.scoreB })
+    .from(gamePlayers)
+    .innerJoin(games, eq(games.id, gamePlayers.gameId))
+    .where(and(eq(gamePlayers.playerId, playerId), isNotNull(gamePlayers.team), isNotNull(games.scoreA)));
+  const rec = { played: rows.length, win: 0, draw: 0, loss: 0 };
+  for (const r of rows) {
+    if ((r.team !== "A" && r.team !== "B") || r.scoreA === null || r.scoreB === null) continue;
+    rec[outcomeFor(r.team, r.scoreA, r.scoreB)]++;
+  }
+  return rec;
+}
+
 // Guests per game, so the "move share" picker never offers one as a payer.
 async function guestIdsByGame(gameIds: number[]) {
   const map: Record<number, number[]> = {};
@@ -238,7 +260,7 @@ export async function getPlayerDetail(id: number) {
   });
 
   const gameIds = [...new Set([...ledger.perGame.map((g) => g.gameId), ...coveredAway.map((a) => a.gameId)])];
-  return { player, ...ledger, coveredAway, guestsByGame: await guestIdsByGame(gameIds) };
+  return { player, ...ledger, coveredAway, record: await loadRecord(id), guestsByGame: await guestIdsByGame(gameIds) };
 }
 
 // Everything the "move share" action needs to know about one attendee's share.
@@ -376,11 +398,13 @@ export async function getGroupShare(token: string) {
       id: g.id,
       playedOn: g.playedOn,
       note: g.note,
+      scoreA: g.scoreA,
+      scoreB: g.scoreB,
       items: g.items.map(({ label, amount }) => ({ label, amount })),
       total: g.total,
       headcount: g.headcount,
       perHead: g.perHead,
-      people: g.players.map((p) => ({ name: p.name, guest: p.guest, amount: p.guest ? null : p.charge })),
+      people: g.players.map((p) => ({ name: p.name, guest: p.guest, team: p.team, amount: p.guest ? null : p.charge })),
     })),
   };
 }

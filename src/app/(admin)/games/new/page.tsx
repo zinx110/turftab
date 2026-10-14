@@ -9,7 +9,7 @@ export default async function NewGamePage() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold">New game</h1>
+      <h1 className="text-2xl font-bold">New game</h1>
       <GameForm
         players={players}
         initial={{ playedOn: todayISO(), note: "", items: [{ label: "Turf", amount: "" }], attendees: [] }}

@@ -6,7 +6,8 @@ import { markGamePaid } from "@/app/(admin)/payments/actions";
 import { formatTaka } from "@/lib/money";
 import { ConfirmButton } from "./confirm-button";
 import { MoveShare } from "./move-share";
-import { btn, btnGhost, card, input } from "./ui";
+import { Avatar } from "./avatar";
+import { btn, btnGhost, card, input, pill } from "./ui";
 
 type Payer = {
   id: number;
@@ -54,21 +55,20 @@ export function GameCollectRow({
   return (
     <li className={`${card} flex flex-col gap-3`}>
       <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <Link href={`/players/${payer.id}`} className="block truncate font-medium">
-            {payer.name}
-          </Link>
-        </div>
-        <div className="shrink-0 text-right">
-          <p className="font-semibold">{formatTaka(payer.total)}</p>
-          <p className={`text-sm ${settled ? "text-emerald-600" : "text-red-600"}`}>
+        <Link href={`/players/${payer.id}`} className="flex min-w-0 items-center gap-3">
+          <Avatar name={payer.name} />
+          <span className="truncate font-semibold">{payer.name}</span>
+        </Link>
+        <div className="flex shrink-0 flex-col items-end gap-1">
+          <p className="font-bold">{formatTaka(payer.total)}</p>
+          <span className={settled ? pill.green : payer.paid > 0 ? pill.amber : pill.red}>
             {settled ? "paid" : payer.paid > 0 ? `${formatTaka(payer.due)} left` : "unpaid"}
-          </p>
+          </span>
         </div>
       </div>
 
       {showLines && (
-        <ul className="flex flex-col gap-1 text-sm">
+        <ul className="flex flex-col gap-1 border-t border-line pt-2 text-sm">
           {payer.lines.map((l) => (
             <li key={l.forId} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
               <span>

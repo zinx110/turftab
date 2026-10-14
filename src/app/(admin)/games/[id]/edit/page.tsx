@@ -27,7 +27,7 @@ export default async function EditGamePage({ params }: { params: Promise<{ id: s
         <Link href={`/games/${game.id}`} className={muted}>
           ← Back to game
         </Link>
-        <h1 className="text-2xl font-semibold">Edit game</h1>
+        <h1 className="text-2xl font-bold">Edit game</h1>
       </header>
       <GameForm
         players={players}

@@ -33,10 +33,15 @@ export const games = pgTable("games", {
   id: serial("id").primaryKey(),
   playedOn: date("played_on").notNull(),
   note: text("note"),
+  // Final score, optional: both set or both null.
+  scoreA: integer("score_a"),
+  scoreB: integer("score_b"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),
-});
+}, (t) => [
+  check("games_scores_valid", sql`(${t.scoreA} is null) = (${t.scoreB} is null) and (${t.scoreA} is null or (${t.scoreA} between 0 and 99 and ${t.scoreB} between 0 and 99))`),
+]);
 
 export const gameItems = pgTable(
   "game_items",
@@ -70,6 +75,8 @@ export const gamePlayers = pgTable(
     charge: integer("charge").notNull(),
     isGuest: boolean("is_guest").notNull().default(false),
     billedToId: integer("billed_to_id").references(() => players.id, { onDelete: "restrict" }),
+    // "A" or "B"; null for games recorded before teams existed.
+    team: text("team"),
   },
   (t) => [
     primaryKey({ columns: [t.gameId, t.playerId] }),
@@ -77,6 +84,7 @@ export const gamePlayers = pgTable(
     index("game_players_billed_to_idx").on(t.billedToId),
     check("game_players_charge_nonneg", sql`${t.charge} >= 0`),
     check("game_players_guest_is_free", sql`not ${t.isGuest} or (${t.charge} = 0 and ${t.billedToId} is null)`),
+    check("game_players_team_valid", sql`${t.team} is null or ${t.team} in ('A', 'B')`),
     check("game_players_no_self_transfer", sql`${t.billedToId} is null or ${t.billedToId} <> ${t.playerId}`),
   ],
 );

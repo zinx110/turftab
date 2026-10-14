@@ -20,8 +20,9 @@ Every week a group of us rents a turf. One person pays the ground, then collects
 | **Split** | `ceil(total ÷ paying players)`. Absent players are never charged. **Guests** are excluded from the headcount, so the others split the cost; they're still listed, tagged *guest*. A **covered** share still counts in the headcount but is billed to a sponsor (who needn't be playing). The rounding surplus is shown, never hidden. |
 | **Payments** | On each game's page the organiser sees who owes for that game, with a one-tap *Mark paid* (two taps, to prevent accidents) and a *Partial* amount box. The dashboard has a full-balance *Mark paid* too. Any payment can be undone. |
 | **Moving a share** | Days after a game, "B will cover mine" is one tap on the player's page or the game's page: *Move* an unpaid share to another player, or back to its owner. The original person then owes nothing for it. Once a share is paid or part-paid it is settled and can no longer move. A player's page, and the game's "Covered by others" list, show who is covering whom. |
+| **Teams & scores** | Everyone who played is split into **Team A / Team B** at random, kept within one player of each other (guests and covered players are on teams too). Editing a game keeps existing teams and puts newcomers on the smaller side. On the game page: *Shuffle*, tap a player to switch sides, and enter the final score. Each player's page shows their won/drawn/lost record, and the group page shows the teams and score. |
 | **Dashboard** | Total outstanding, total collected, and who owes, biggest first, each with *Copy message* (a ready-to-paste reminder with the amount, bKash number and the player's link). |
-| **Sharing** | A group link (every game with each person's share and a *guest* tag — no balances, no payment status, no transfers) and a personal link per player (that player's balance only, including anyone they cover). Both rotate on demand. |
+| **Sharing** | A group link (every game with the teams, score, each person's share and a *guest* tag — no balances, no payment status, no transfers) and a personal link per player (that player's balance only, including anyone they cover). Both rotate on demand. |
 | **Export** | Download players, games, charges, payments and balances as CSV, so the records don't depend on one database. |
 | **PWA** | Installable to the home screen, opens full-screen, and shows a friendly offline page when there's no signal. |
 
@@ -62,6 +63,8 @@ erDiagram
         int id PK
         date played_on
         text note
+        int score_a
+        int score_b
     }
     game_items {
         int id PK
@@ -75,6 +78,7 @@ erDiagram
         int charge
         bool is_guest
         int billed_to_id FK
+        text team
     }
     payments {
         int id PK
@@ -180,6 +184,7 @@ src/
   db/               Drizzle schema + lazy Neon client
   lib/
     money.ts        split + rounding        ← pure, unit-tested
+    teams.ts        team draw + win/draw/loss ← pure, unit-tested
     ledger.ts       oldest-first allocation ← pure, unit-tested
     csv.ts          CSV encoding            ← pure, unit-tested
     session.ts      signing + constant-time compare ← pure, unit-tested
@@ -236,7 +241,7 @@ It's a personal tool, so I treated "market value" as irrelevant and optimised fo
 
 ## How I tested it
 
-- **Unit tests (43)** on the pure logic where mistakes cost money or trust: the split and rounding (including the no-undercharge property, also with guests), guest and transfer billing (the worked example, invalid combinations), payment allocation (partial, over-payment, game-tied payments, several charge lines per game), session signing (tampered, wrong-secret and expired tokens), and CSV encoding (quoting, formula injection, non-Latin names).
+- **Unit tests (49)** on the pure logic where mistakes cost money or trust: the split and rounding (including the no-undercharge property, also with guests), team assignment (always balanced, existing teams kept, newcomers join the smaller side), guest and transfer billing (the worked example, invalid combinations), payment allocation (partial, over-payment, game-tied payments, several charge lines per game), session signing (tampered, wrong-secret and expired tokens), and CSV encoding (quoting, formula injection, non-Latin names).
 - **Live checks against a real Neon database during development**, covering the full flow: multi-item games, absent players, bad input, one-tap and partial payments, undo, game edits regenerating charges, and both share pages including token rotation. The group-page payload was asserted not to contain balance or payment data.
 - **Black-box probes of the production build** for auth boundaries (logged-out, forged and wrong-secret cookies all get a 307), the PWA files and headers, and the CSV downloads.
 
