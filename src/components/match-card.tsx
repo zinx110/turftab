@@ -119,7 +119,7 @@ function TeamColumn(props: { team: Team; members: Member[]; onSwitch: (m: Member
   const { setNodeRef, isOver } = useDroppable({ id: `team${team}`, data: { team } });
   const s = style[team];
   return (
-    <div ref={setNodeRef} className={`${card} overflow-hidden p-0 transition ${isOver ? `ring-2 ${s.over}` : ""}`}>
+    <div ref={setNodeRef} className={`${card} overflow-hidden p-0! transition ${isOver ? `ring-2 ${s.over}` : ""}`}>
       <div className={`h-1.5 ${s.bar}`} />
       <div className="min-h-24 p-2">
         <p className={`flex items-baseline justify-between px-1.5 font-semibold ${s.text}`}>

@@ -423,10 +423,10 @@ export async function getGroupToken() {
 // Read-only view for the group link. It shows the game day (costs, everyone's
 // share, guest tags) and each match's teams and score. It deliberately omits
 // balances, payments, who has paid, and who a share was transferred to.
-export async function getGroupShare(token: string) {
+export async function getGroupShare(token: string, gameId?: number) {
   const stored = await readSetting("group_token");
   if (!stored || !safeEqual(token, stored)) return null;
-  const [all, bkash] = await Promise.all([loadGames(), readSetting("bkash_number")]);
+  const [all, bkash] = await Promise.all([loadGames(gameId), readSetting("bkash_number")]);
   return {
     bkash,
     games: all.map((g) => ({

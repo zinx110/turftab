@@ -41,6 +41,15 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         {game.note && <p className={muted}>{game.note}</p>}
       </header>
 
+      <AddToGame
+        gameId={game.id}
+        candidates={candidates}
+        total={game.total}
+        headcount={game.headcount}
+        anyPaid={payers.some((p) => p.paid > 0)}
+        matches={game.matches.map((m) => ({ id: m.id, number: m.number }))}
+      />
+
       <section className={`${card} flex flex-col gap-3`}>
         <ul className="flex flex-col gap-1.5 text-sm">
           {game.items.map((i) => (
@@ -62,7 +71,7 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         </div>
       </section>
 
-      <ShareLink path={`/s/${groupToken}#game-${game.id}`} />
+      <ShareLink path={`/s/${groupToken}/games/${game.id}`} />
 
       <section className="flex flex-col gap-5">
         <h2 className={sectionTitle}>Matches</h2>
@@ -78,15 +87,6 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         ))}
         <AddMatchButton gameId={game.id} next={game.matches.length + 1} />
       </section>
-
-      <AddToGame
-        gameId={game.id}
-        candidates={candidates}
-        total={game.total}
-        headcount={game.headcount}
-        anyPaid={payers.some((p) => p.paid > 0)}
-        matches={game.matches.map((m) => ({ id: m.id, number: m.number }))}
-      />
 
       <section className="flex flex-col gap-2">
         <div className="flex items-baseline justify-between">
