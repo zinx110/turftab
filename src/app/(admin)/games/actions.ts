@@ -1,13 +1,13 @@
 "use server";
 
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { db } from "@/db";
 import { gameItems, gamePlayers, games } from "@/db/schema";
 import { requireAdmin } from "@/lib/auth";
-import { getPlayersByIds, getShareState } from "@/lib/data";
+import { getGame, getPlayersByIds, getShareState } from "@/lib/data";
 import { assignTeams, type Team } from "@/lib/teams";
 import { computeCharges } from "@/lib/money";
 
@@ -35,7 +35,8 @@ const gameSchema = z.object({
 
 export type GameInput = z.input<typeof gameSchema>;
 
-export async function saveGame(input: GameInput) {
+// Does the work of saving a game. Shared by the form and "add a player".
+async function persistGame(input: GameInput) {
   await requireAdmin();
   const parsed = gameSchema.safeParse(input);
   if (!parsed.success) return { error: parsed.error.issues[0].message };
@@ -104,7 +105,35 @@ export async function saveGame(input: GameInput) {
   }
 
   revalidatePath("/", "layout");
+  return {};
+}
+
+export async function saveGame(input: GameInput) {
+  const result = await persistGame(input);
+  if (result.error) return result;
   redirect("/games");
+}
+
+// Add someone to a game that already exists. Everyone's share is
+// recalculated (more people, smaller share); existing teams, the score and
+// who-covers-whom are kept, and the newcomer joins the smaller team.
+export async function addPlayerToGame(gameId: number, playerId: number, mode: "own" | "guest") {
+  await requireAdmin();
+  const game = await getGame(gameId);
+  if (!game) return { error: "Game not found." };
+  if (game.players.some((p) => p.id === playerId)) return { error: "They're already in this game." };
+  if (mode !== "own" && mode !== "guest") return { error: "Invalid choice." };
+
+  return persistGame({
+    id: gameId,
+    playedOn: game.playedOn,
+    note: game.note ?? undefined,
+    items: game.items.map((i) => ({ label: i.label, amount: i.amount })),
+    attendees: [
+      ...game.players.map((p) => ({ playerId: p.id, guest: p.guest, billedToId: p.billedToId })),
+      { playerId, guest: mode === "guest" },
+    ],
+  });
 }
 
 export async function deleteGame(id: number) {
@@ -195,6 +224,27 @@ export async function saveScore(gameId: number, scoreA: number | null, scoreB: n
     .where(eq(games.id, gameId))
     .returning({ id: games.id });
   if (updated.length === 0) return { error: "Game not found." };
+  revalidatePath("/", "layout");
+  return {};
+}
+
+// Drag-and-drop: swap two players who are on opposite teams, atomically.
+export async function swapTeams(gameId: number, aId: number, bId: number) {
+  await requireAdmin();
+  const rows = await db()
+    .select({ playerId: gamePlayers.playerId, team: gamePlayers.team })
+    .from(gamePlayers)
+    .where(and(eq(gamePlayers.gameId, gameId), inArray(gamePlayers.playerId, [aId, bId])));
+  const a = rows.find((r) => r.playerId === aId);
+  const b = rows.find((r) => r.playerId === bId);
+  if (!a || !b || aId === bId) return { error: "Both players must be in this game." };
+  if (!a.team || !b.team || a.team === b.team) return { error: "They need to be on different teams." };
+  await db()
+    .update(gamePlayers)
+    .set({
+      team: sql`case ${gamePlayers.playerId} when ${aId} then ${b.team} when ${bId} then ${a.team} end`,
+    })
+    .where(and(eq(gamePlayers.gameId, gameId), inArray(gamePlayers.playerId, [aId, bId])));
   revalidatePath("/", "layout");
   return {};
 }

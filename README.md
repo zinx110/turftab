@@ -7,7 +7,7 @@ Every week a group of us rents a turf. One person pays the ground, then collects
 - **Organiser** logs in, records each game (costs + who played), and taps *Mark paid* as money arrives.
 - **Players** get a private link that shows only their own balance and the games they still owe for, plus the organiser's bKash number. They never log in and never see anyone else's balance.
 
-> Stack: Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · Neon Postgres · Drizzle ORM · Vitest · PWA
+> Stack: Next.js 16 (App Router) · TypeScript · Tailwind CSS 4 · Neon Postgres · Drizzle ORM · dnd-kit · Vitest · PWA
 > Currency is whole taka (৳). There are no decimals anywhere in the data model.
 
 ---
@@ -20,7 +20,8 @@ Every week a group of us rents a turf. One person pays the ground, then collects
 | **Split** | `ceil(total ÷ paying players)`. Absent players are never charged. **Guests** are excluded from the headcount, so the others split the cost; they're still listed, tagged *guest*. A **covered** share still counts in the headcount but is billed to a sponsor (who needn't be playing). The rounding surplus is shown, never hidden. |
 | **Payments** | On each game's page the organiser sees who owes for that game, with a one-tap *Mark paid* (two taps, to prevent accidents) and a *Partial* amount box. The dashboard has a full-balance *Mark paid* too. Any payment can be undone. |
 | **Moving a share** | Days after a game, "B will cover mine" is one tap on the player's page or the game's page: *Move* an unpaid share to another player, or back to its owner. The original person then owes nothing for it. Once a share is paid or part-paid it is settled and can no longer move. A player's page, and the game's "Covered by others" list, show who is covering whom. |
-| **Teams & scores** | Everyone who played is split into **Team A / Team B** at random, kept within one player of each other (guests and covered players are on teams too). Editing a game keeps existing teams and puts newcomers on the smaller side. On the game page: *Shuffle*, tap a player to switch sides, and enter the final score. Each player's page shows their won/drawn/lost record, and the group page shows the teams and score. |
+| **Teams & scores** | Everyone who played is split into **Team A / Team B** at random, kept within one player of each other (guests and covered players are on teams too). Editing a game keeps existing teams and puts newcomers on the smaller side. On the game page: *Shuffle*, **drag a player onto someone on the other team to swap them** (or onto the other team to move them; press-and-hold on a phone), and enter the final score. Each player's page shows their won/drawn/lost record, and the group page shows the teams and score. |
+| **Late players** | *Add a player* on a saved game (existing player or a new name, optionally as a guest). Shares are recalculated, with a preview of the new per-head amount and a warning if anyone already paid the old one; teams and the score are kept and the newcomer joins the smaller side. |
 | **Dashboard** | Total outstanding, total collected, and who owes, biggest first, each with *Copy message* (a ready-to-paste reminder with the amount, bKash number and the player's link). |
 | **Sharing** | A group link (every game with the teams, score, each person's share and a *guest* tag — no balances, no payment status, no transfers) and a personal link per player (that player's balance only, including anyone they cover). Both rotate on demand. |
 | **Export** | Download players, games, charges, payments and balances as CSV, so the records don't depend on one database. |

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { AddToGame } from "@/components/add-to-game";
 import { GameCollectRow } from "@/components/game-collect-row";
 import { MoveShare } from "@/components/move-share";
 import { TeamsPanel } from "@/components/teams-panel";
@@ -17,6 +18,8 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
   if (!data) notFound();
   const { game, payers, covered, guests } = data;
   const guestIds = guests.map((g) => g.id);
+  const inGame = new Set(game.players.map((p) => p.id));
+  const candidates = activePlayers.filter((p) => !inGame.has(p.id));
 
   const collected = payers.reduce((s, p) => s + p.paid, 0);
   const billed = payers.reduce((s, p) => s + p.total, 0);
@@ -62,6 +65,14 @@ export default async function GamePage({ params }: { params: Promise<{ id: strin
         members={game.players.map((p) => ({ id: p.id, name: p.name, guest: p.guest, team: p.team }))}
         scoreA={game.scoreA}
         scoreB={game.scoreB}
+      />
+
+      <AddToGame
+        gameId={game.id}
+        candidates={candidates}
+        total={game.total}
+        headcount={game.headcount}
+        anyPaid={payers.some((p) => p.paid > 0)}
       />
 
       <section className="flex flex-col gap-2">
